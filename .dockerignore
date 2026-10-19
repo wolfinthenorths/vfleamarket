@@ -1,0 +1,7 @@
+.git
+.env*
+local-data
+tests/output
+__pycache__
+public/assets/source
+
