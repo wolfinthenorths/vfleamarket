@@ -5,7 +5,6 @@
  */
 const FM_BANK_ID = '1iuFkiLPEaA770-iBCLJKuHaLkCY-_43GpY4xcrcwaX4';
 const FM_REPORT_ID = '11kCbQm19YVnQ3Jw4Z9iActhsLIayuDeBsz8Obywq3Bc';
-const FM_CATALOG_URL = 'https://raw.githubusercontent.com/wolfinthenorths/vfleamarket/main/public/catalog.json';
 const FM_LEDGER_HEADERS = ['ID заказа','Отпечаток запроса','ID персонажа','Telegram ID','UTC','Квитанция JSON','Отчёт синхронизирован'];
 const FM_ORDERS_HEADERS = ['Когда (Томск)','Номер заказа','Персонаж','Telegram','Telegram ID','Магазин','Предметов','Списано крышек','Баланс до','Баланс после','Статус','Квитанция JSON'];
 const FM_ITEMS_HEADERS = ['Когда (Томск)','Номер заказа','Персонаж','Telegram','Магазин','Предмет','Количество','Цена за шт.','Сумма','Слотов','Telegram ID'];
@@ -30,22 +29,8 @@ function fmRows_(sheet,width) {
   return n>1 ? sheet.getRange(2,1,n-1,width).getValues() : [];
 }
 function fmCatalog_() {
-  const cache=CacheService.getScriptCache();
-  let raw=cache.get('fleamarket_catalog_v1');
-  if(!raw) {
-    const response=UrlFetchApp.fetch(FM_CATALOG_URL,{muteHttpExceptions:true,followRedirects:false});
-    if(response.getResponseCode()!==200) fmError_('connection_failed');
-    raw=response.getContentText();
-    if(raw.length>230000) fmError_('schema_changed');
-    // Cache only compact financial data; descriptions and images are irrelevant here.
-    const full=JSON.parse(raw);
-    raw=JSON.stringify({revision:full.revision,shops:full.shops.map(s=>({id:s.id,name:s.name,items:s.items.map(i=>({id:i.id,name:i.name,price:i.price,slots:i.slots}))}))});
-    if(raw.length>95000) fmError_('schema_changed');
-    cache.put('fleamarket_catalog_v1',raw,60);
-  }
-  const catalog=JSON.parse(raw);
-  if(!/^[a-f0-9]{16}$/.test(catalog.revision) || !Array.isArray(catalog.shops) || catalog.shops.length!==6) fmError_('schema_changed');
-  return catalog;
+  if(!FM_CATALOG_DATA || !/^[a-f0-9]{16}$/.test(FM_CATALOG_DATA.revision) || FM_CATALOG_DATA.shops.length!==6) fmError_('schema_changed');
+  return FM_CATALOG_DATA;
 }
 function fmBank_() {
   const book=SpreadsheetApp.openById(FM_BANK_ID),sheet=book.getSheetByName('Крышки');

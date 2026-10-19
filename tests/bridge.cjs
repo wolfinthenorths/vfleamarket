@@ -2,7 +2,7 @@
    No Google account, real player or real balance is used by these tests. */
 const fs=require('node:fs'),vm=require('node:vm'),crypto=require('node:crypto'),assert=require('node:assert/strict');
 const root=require('node:path').resolve(__dirname,'..');
-const source=fs.readFileSync(root+'/google/market.gs','utf8');
+const source=fs.readFileSync(root+'/google/catalog.gs','utf8')+'\n'+fs.readFileSync(root+'/google/market.gs','utf8');
 const catalog=JSON.parse(fs.readFileSync(root+'/public/catalog.json','utf8'));
 const bankId='1iuFkiLPEaA770-iBCLJKuHaLkCY-_43GpY4xcrcwaX4',reportId='11kCbQm19YVnQ3Jw4Z9iActhsLIayuDeBsz8Obywq3Bc';
 class Sheet{
@@ -40,7 +40,7 @@ function fixture(){
  vm.runInContext(source,context);
  const user={id:'12345',username:'player'},request={action:'market_checkout',user,orderId:'11111111-1111-4111-8111-111111111111',shopId:'count',revision:catalog.revision,expectedTotal:460,items:[{id:'count-01',quantity:2}]};
  const run=p=>JSON.parse(JSON.stringify(context.marketDispatch_({...request,...p})));
- return {bank,ledger,orders,items,players,flags,run,request};
+ return {bank,ledger,orders,items,players,flags,run,request,setRevision:value=>vm.runInContext('FM_CATALOG_DATA.revision='+JSON.stringify(value),context)};
 }
 let tests=0;function test(name,fn){fn();tests++;console.log('PASS',name);}
 test('cart debits once and mirrors quantity, price, before/after and note',()=>{const f=fixture(),r=f.run();assert.equal(r.ok,true);assert.equal(f.bank.rows[1][8],460);assert.equal(f.bank.rows[1][9],540);assert.equal(f.bank.formulas['2:10'],'=1000-I2');assert.equal(f.ledger.rows.length,2);assert.equal(f.orders.rows.length,2);assert.equal(f.items.rows[1][6],2);assert.equal(f.items.rows[1][8],460);assert.match(f.bank.notes['2:9'],/Ментаты × 2/);assert.equal(f.ledger.rows[1][6],true);});
@@ -51,7 +51,7 @@ test('insufficient money leaves all sheets unchanged',()=>{const f=fixture();ass
 test('server ignores spoofed totals and rejects mixed shops',()=>{const f=fixture();assert.equal(f.run({expectedTotal:1}).error,'catalog_changed');assert.equal(f.run({items:[{id:'kirk-01',quantity:1}]}).error,'invalid_cart');assert.equal(f.flags.bankCommits,0);});
 test('same id with changed cart cannot debit again',()=>{const f=fixture();f.run();assert.equal(f.run({items:[{id:'count-01',quantity:1}],expectedTotal:230}).error,'id_conflict');assert.equal(f.flags.bankCommits,1);});
 test('changing Telegram account cannot read or replay someone else receipt',()=>{const f=fixture();f.run();assert.equal(f.run({user:{id:'67890',username:'other'}}).error,'id_conflict');assert.equal(f.run({action:'market_order',user:{id:'67890',username:'other'}}).error,'order_not_found');});
-test('expired catalog cannot buy, but can replay an old paid order',()=>{const f=fixture();assert.equal(f.run({revision:'0000000000000000'}).error,'catalog_changed');f.run();catalog.revision='9999999999999999';assert.equal(f.run().replayed,true);catalog.revision=f.request.revision;});
+test('expired catalog cannot buy, but can replay an old paid order',()=>{const f=fixture();assert.equal(f.run({revision:'0000000000000000'}).error,'catalog_changed');f.run();f.setRevision('9999999999999999');assert.equal(f.run().replayed,true);});
 test('expenses formula and script lock both block a purchase',()=>{const f=fixture();f.bank.formulas['2:9']='=10';assert.equal(f.run().error,'balance_formula');delete f.bank.formulas['2:9'];f.flags.locked=true;assert.equal(f.run().error,'busy');assert.equal(f.flags.bankCommits,0);});
 test('initial claim is unique and subsequent account switching is blocked',()=>{const f=fixture();assert.equal(f.run({action:'market_bind',user:{id:'67890',username:'other'},characterId:f.bank.rows[1][10]}).error,'character_taken');assert.equal(f.run({action:'market_bind',characterId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'}).error,'already_bound');});
 console.log(`${tests} transaction tests passed; zero live balances used.`);
