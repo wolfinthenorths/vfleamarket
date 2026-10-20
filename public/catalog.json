@@ -1631,8 +1631,8 @@
       "accent": "#a43c32",
       "tagline": "Холодная и ядерная",
       "shortDescription": "Десять вкусов довоенного оптимизма.",
-      "banner": null,
-      "poster": null
+      "banner": "/assets/banners/nuka.gif",
+      "poster": "/assets/banners/nuka.webp"
     }
   ]
 }

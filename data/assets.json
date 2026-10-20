@@ -850,5 +850,11 @@
     "driveId": "136Hear8ry1qXYkcgHio4eqrISJx5g2ZP",
     "mime": "image/gif",
     "sha256": "88e93240491294bf5e493270dc24d3942b71ad3b7fd64d9789ae4b3ee1fa473f"
+  },
+  {
+    "driveId": "13gr9vmwGNsIaTpkrkvzWKzSMxhPf7Ubz",
+    "mime": "image/gif",
+    "path": "/assets/banners/nuka.gif",
+    "sha256": "c93a1834f505061b0fef41f159ffcc05d63d239e7f04d5f5b8fbca43c4baf484"
   }
 ]
