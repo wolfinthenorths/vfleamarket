@@ -14,6 +14,9 @@
   const caps = value => new Intl.NumberFormat('ru-RU').format(value);
   const counted = (n,one,few,many) => `${n} ${n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many}`;
   const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 2 12h14l2-12H3Zm4 0 5-6 5 6M8 12v4m4-4v4m4-4v4"/></svg>';
+  // Touch and programmatic dialog focus should not draw browser focus frames.
+  document.addEventListener('keydown',e=>{if(e.key==='Tab')document.documentElement.dataset.input='keyboard';});
+  document.addEventListener('pointerdown',()=>{delete document.documentElement.dataset.input;},true);
   try { carts = JSON.parse(localStorage.getItem(cartKey) || '{}'); pending = JSON.parse(localStorage.getItem(pendingKey) || 'null'); } catch { carts = {}; }
   if (!carts || typeof carts !== 'object' || Array.isArray(carts)) carts = {};
   try { tg?.ready(); tg?.expand(); tg?.setHeaderColor('#1b241d'); tg?.setBackgroundColor('#1b241d'); tg?.disableVerticalSwipes?.(); } catch {}
@@ -87,7 +90,7 @@
   }
   function renderInventory() {
     activeShop='';
-    window.BackpackView.render({main,api,esc,counted,scope,authenticated,catalog});
+    window.BackpackView.render({main,api,esc,counted,scope,authenticated,catalog,notify:toast});
   }
   function openSheet(html,entry=false) { dialog.classList.toggle('entry-screen',entry);sheet.innerHTML=`<div class="sheet-body"><button class="close-sheet" data-close aria-label="Закрыть">×</button>${html}</div>`;if(!dialog.open)dialog.showModal();applyMotion(); }
   function detail(id){const i=byId[id];if(!i)return;openSheet(`<div class="detail-image"><img src="${i.image}" alt="${esc(i.name)}"></div><span class="eyebrow">${esc(i.category)} / ${esc(shopOf(i.shopId).name)}</span><h2 id="sheet-title">${esc(i.name)}</h2><p class="detail-description">${esc(i.description)}</p>${i.effects.map(l=>{const n=l.indexOf(':');return `<p class="effect-line">${n>=0?`<strong>${esc(l.slice(0,n+1))}</strong>${esc(l.slice(n+1))}`:esc(l)}</p>`;}).join('')}<div class="detail-footer"><div><span class="price">${caps(i.price)} <small>крышек</small></span><small>Слотов: ${i.slots}</small></div>${carts[i.shopId]?.[id]?quantityControl(id,carts[i.shopId][id],'detail'):'<span class="eyebrow">В наличии</span>'}</div><button class="primary wide" data-add-detail="${id}">Добавить в корзину</button>`);}
@@ -110,7 +113,7 @@
   async function checkout(id){
     if(!authenticated){location.href='https://t.me/vfleamarketbot';return;}if(busy||pending)return;
     busy=true;renderCarts();
-    try{await loadState();if(!state.character){showBind();return;}const lines=linesFor(id),total=totalFor(id);if(!lines.length)return;if(state.balance<total){toast(`Не хватает ${caps(total-state.balance)} крышек.`);return;}
+    try{if(!state?.character)await loadState();if(!state.character){showBind();return;}const lines=linesFor(id),total=totalFor(id);if(!lines.length)return;if(state.balance<total)await loadState();if(state.balance<total){toast(`Не хватает ${caps(total-state.balance)} крышек.`);return;}
       openSheet(`<span class="eyebrow">${esc(shopOf(id).name)}</span><h2 id="sheet-title">Все верно?</h2><p class="detail-description">Покупатель: ${esc(state.character.name)}</p><ul class="confirm-lines">${lines.map(i=>`<li><span>${esc(i.name)} × ${i.quantity}</span><span>${caps(i.total)} кр.</span></li>`).join('')}</ul><div class="confirm-total"><span>К оплате</span><span class="price">${caps(total)} <small>крышек</small></span></div><p class="confirm-balance">На счете ${caps(state.balance)} → останется ${caps(state.balance-total)} кр.</p><button class="primary wide" data-confirm="${id}">Списать ${caps(total)} крышек</button><button class="text-button wide" data-close>Вернуться к корзине</button>`);
     }catch(e){toast(e.message);}finally{busy=false;if(routeValue().startsWith('carts'))renderCarts();}
   }

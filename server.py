@@ -21,6 +21,7 @@ APP_URL = os.environ.get("APP_URL", "").rstrip("/")
 DATA = Path(os.environ.get("DATA_DIR", str(ROOT / "local-data")))
 BRIDGE = SheetsBridge(os.environ.get("SHEETS_BRIDGE_URL", ""), os.environ.get("SHEETS_BRIDGE_SECRET", ""))
 STOP = threading.Event()
+RECONCILE_WAKE = threading.Event()
 BRIDGE_STATUS = {"connected": False, "checkedAt": None}
 
 def db():
@@ -88,17 +89,27 @@ def bot_worker():
             STOP.wait(.2)
 
 def reconcile_worker():
+    next_verification = 0
     while not STOP.is_set():
+        RECONCILE_WAKE.clear()
+        retry_after = 60
         if BRIDGE.configured:
             try:
-                verification = BRIDGE.call("verify")
-                if verification.get("revision") != CATALOG.get("revision"):
-                    raise MarketError("catalog_changed", 503)
-                BRIDGE.call("reconcile")
+                if time.monotonic() >= next_verification:
+                    verification = BRIDGE.call("verify")
+                    if verification.get("revision") != CATALOG.get("revision"):
+                        raise MarketError("catalog_changed", 503)
+                    next_verification = time.monotonic() + 300
+                reconciliation = BRIDGE.call("reconcile")
+                if reconciliation.get("more"):
+                    retry_after = 1
                 BRIDGE_STATUS.update(connected=True, checkedAt=int(time.time()))
-            except MarketError:
-                BRIDGE_STATUS.update(connected=False, checkedAt=int(time.time()))
-        STOP.wait(60)
+            except MarketError as error:
+                if error.code == "busy":
+                    retry_after = 3
+                else:
+                    BRIDGE_STATUS.update(connected=False, checkedAt=int(time.time()))
+        RECONCILE_WAKE.wait(retry_after)
 
 class RateLimit:
     def __init__(self):
@@ -206,22 +217,27 @@ class Handler(BaseHTTPRequestHandler):
                 result = BRIDGE.call("order", user, orderId=validate_order_id(body.get("orderId")))
             else:
                 order_id = validate_order_id(body.get("orderId"))
-                # Resolve an uncertain prior commit BEFORE checking today's prices.
-                # A catalog update must never hide an already-paid receipt.
                 try:
-                    result = BRIDGE.call("order", user, orderId=order_id)
+                    cart, _ = validate_cart(body)
+                except MarketError as validation_error:
+                    # Old paid receipts remain recoverable after a catalog change.
+                    # Valid new carts use one bridge call; checkout itself is idempotent.
+                    try:
+                        result = BRIDGE.call("order", user, orderId=order_id)
+                    except MarketError as lookup_error:
+                        if lookup_error.code == "order_not_found":
+                            raise validation_error
+                        raise
                     order = result["order"]
                     requested = sorted((i.get("id"), i.get("quantity")) for i in body.get("items", []) if isinstance(i, dict))
                     purchased = sorted((i["id"], i["quantity"]) for i in order["lines"])
                     if requested != purchased or body.get("shopId") != order["shopId"] or body.get("revision") != order["revision"] or body.get("expectedTotal") != order["total"]:
                         raise MarketError("id_conflict", 409)
                     result["replayed"] = True
-                except MarketError as error:
-                    if error.code != "order_not_found":
-                        raise
-                    cart, _ = validate_cart(body)
+                else:
                     result = BRIDGE.call("checkout", user, orderId=order_id, **cart)
                 mirror_order(user, result["order"])
+                RECONCILE_WAKE.set()
             self.reply(result)
         except MarketError as error:
             self.reply({"ok": False, "error": error.code, "message": str(error)}, error.status)
@@ -245,6 +261,7 @@ def main():
     server.daemon_threads = True
     def shutdown(*_):
         STOP.set()
+        RECONCILE_WAKE.set()
         threading.Thread(target=server.shutdown, daemon=True).start()
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)

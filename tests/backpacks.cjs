@@ -7,7 +7,7 @@ function a1(text){const m=text.match(/^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/);asser
 class Sheet{
  constructor(id,name,book){this.id=id;this.name=name;this.book=book;this.values={};this.notes={};this.formulas={};this.invalidCapacity=false;}
  getName(){return this.name;}setName(name){if(this.book.sheets.some(s=>s!==this&&s.name===name))throw Error('duplicate');this.name=name;return this;}
- getSheetId(){return this.id;}getDataRange(){return this.getRange(1,1,100,26);}
+ getSheetId(){return this.id;}getParent(){return this.book;}getDataRange(){return this.getRange(1,1,100,26);}
  copyTo(book){const copy=new Sheet(900+book.sheets.length,'Copy '+this.name,book);copy.values={...this.values};copy.notes={...this.notes};copy.formulas={...this.formulas};book.sheets.push(copy);return copy;}
  getRange(r,c,h=1,w=1){if(typeof r==='string')[r,c,h,w]=a1(r);const sheet=this,key=(i,j)=>(r+i)+':'+(c+j),range={
   getValue:()=>sheet.values[key(0,0)]??'',getValues:()=>Array.from({length:h},(_,i)=>Array.from({length:w},(_,j)=>sheet.values[key(i,j)]??'')),
@@ -20,7 +20,8 @@ class Sheet{
 }
 function fixture(){
  let nextId=1,writes=0;
- const books={};for(const id of [mainId,...Object.values(branchIds)])books[id]={id,sheets:[],getSheets(){return this.sheets;}};
+ const books={};for(const id of [mainId,...Object.values(branchIds)])books[id]={id,sheets:[],getId(){return this.id;},getSheets(){return this.sheets;}};
+ const cache=new Map();
  const add=(book,name)=>{const s=new Sheet(nextId++,name,books[book]);books[book].sheets.push(s);return s;};
  const main=add(mainId,'Эшвейл');main.getRange('C2').setValue('Райдер');main.getRange('B10:B15').setValues([[17],[15],[13],[14],[12],[17]]);main.getRange('B17:B36').setValues(Array.from({length:20},()=>['✓']));
  const setup=(s)=>{s.getRange('C2').setValue('Райдер');s.getRange('O14').setValue('Рюкзак');s.getRange('O15').setValue('Количество слотов');s.getRange('B16').setValue(8);s.getRange('S15').setFormula('=capacity');return s;};
@@ -32,32 +33,41 @@ function fixture(){
   fmParseOrder_:entry=>JSON.parse(entry.values[5]),fmCurrent_:(_bank,_report,u)=>u.id===user.id?character:null,
   Utilities:{Charset:{UTF_8:1},DigestAlgorithm:{SHA_256:1},computeDigest:(_,text)=>[...crypto.createHash('sha256').update(text).digest()]},
   SpreadsheetApp:{openById:id=>{assert(books[id],id);return books[id];},flush(){}},
+  CacheService:{getScriptCache:()=>({get:key=>cache.get(key)||null,put:(key,value)=>cache.set(key,value)})},
   Sheets:{Spreadsheets:{batchUpdate(body,id){assert(books[id],id);writes++;for(const request of body.requests){const q=request.updateCells;assert(q);const sheet=books[id].sheets.find(s=>s.id===q.start.sheetId);assert(sheet);q.rows.forEach((row,i)=>row.values.forEach((cell,j)=>{const key=(q.start.rowIndex+1+i)+':'+(q.start.columnIndex+1+j);if(q.fields.includes('userEnteredValue')){if(cell.userEnteredValue?.formulaValue)sheet.formulas[key]=cell.userEnteredValue.formulaValue;else sheet.values[key]=cell.userEnteredValue?.stringValue??cell.userEnteredValue?.numberValue??'';}if(q.fields.includes('note'))sheet.notes[key]=cell.note;}));}}}}
  });
  vm.runInContext(source,context);
+ context.Sheets.Spreadsheets.get=(id,options)=>{
+  const match=options.ranges[0].match(/^'((?:[^']|'')*)'!(.*)$/);assert(match);
+  const sheet=books[id].sheets.find(s=>s.name===match[1].replace(/''/g,"'"));assert(sheet);
+  const [r,c,h,w]=a1(match[2]);return {sheets:[{data:[{rowData:Array.from({length:h},(_,i)=>({values:Array.from({length:w},(_,j)=>{
+   const key=(r+i)+':'+(c+j);return {formattedValue:String(sheet.values[key]??''),note:sheet.notes[key]||'',userEnteredValue:sheet.formulas[key]?{formulaValue:sheet.formulas[key]}:{}};
+  })}))}]}]};
+ };
  const purchase=(quantity=2)=>{const item=catalog.shops[0].items[0],id='receipt-'+orders.length;orders.push([id,'',character.id,user.id,0,JSON.stringify({id,userId:user.id,character,lines:[{id:item.id,name:item.name,quantity,slots:item.slots}]}),true]);};purchase();
- const run=(action='market_inventory',fields={})=>JSON.parse(JSON.stringify(context.fmInventoryDispatch_({action,branchId:'2.4',...fields},bank,{},fields.user||user)));
+ const reset=()=>vm.runInContext('for(const k in FMIN_BOOK_CACHE)delete FMIN_BOOK_CACHE[k];for(const k in FMIN_BRANCH_CACHE)delete FMIN_BRANCH_CACHE[k];',context);
+ const run=(action='market_inventory',fields={})=>{reset();return JSON.parse(JSON.stringify(context.fmInventoryDispatch_({action,branchId:'2.4',...fields},bank,{},fields.user||user)));};
  const save=(inventory,quantity,extra={})=>run('market_pack_save',{version:inventory.pack.version,requestId:'11111111-1111-4111-8111-111111111111',items:quantity?[{id:'count-01',quantity}]:[],...extra});
- return {books,main,pack,other,orders,purchase,run,save,user,get writes(){return writes;}};
+ return {books,main,pack,other,orders,purchase,run,save,user,sync:()=>{reset();return context.fmSyncInventories_(bank);},get writes(){return writes;}};
 }
 let tests=0;function test(name,fn){fn();tests++;console.log('PASS',name);}
 test('full ownership includes purchases older than the former 25-order window',()=>{const f=fixture();for(let i=0;i<30;i++)f.purchase(1);assert.equal(f.run().items[0].quantity,32);});
-test('inventory mirror is idempotent and preserves manual starting possessions',()=>{const f=fixture();f.main.getRange('H25').setValue('Ментаты × 3');let r=f.run();assert.equal(r.items[0].quantity,5);const count=f.writes;r=f.run();assert.equal(r.items[0].quantity,5);assert.equal(f.writes,count);assert.match(f.main.getRange('H25').getValue(),/Ментаты × 3/);});
+test('inventory reads do not write; background mirror is idempotent and preserves manual possessions',()=>{const f=fixture();f.main.getRange('H25').setValue('Ментаты × 3');let r=f.run();assert.equal(r.items[0].quantity,5);assert.equal(f.writes,0);assert.equal(f.sync().synced,1);const count=f.writes;r=f.run();assert.equal(r.items[0].quantity,5);assert.equal(f.sync().synced,0);assert.equal(f.writes,count);assert.match(f.main.getRange('H25').getValue(),/Ментаты × 3/);});
 test('backpack saves update visible cells without debiting or removing inventory',()=>{const f=fixture(),r=f.run();assert.equal(r.pack.capacity,9);const saved=f.save(r,2);assert.equal(saved.pack.used,2);assert.equal(saved.items[0].quantity,2);assert.match(f.pack.getRange('R17').getValue(),/Ментаты × 2/);assert.equal(f.orders.length,1);});
 test('ownership and capacity are both checked on the server',()=>{const f=fixture(),r=f.run();assert.throws(()=>f.save(r,3),/item_not_owned/);f.purchase(20);assert.throws(()=>f.save(f.run(),10),/pack_full/);});
 test('changed strength rejects stale saves; an existing overload never deletes contents',()=>{const f=fixture();f.purchase(8);let r=f.run();r=f.save(r,9);f.pack.getRange('B16').setValue(6);assert.throws(()=>f.save(r,1,{requestId:'22222222-2222-4222-8222-222222222222'}),/pack_changed/);const updated=f.run();assert.equal(updated.pack.capacity,7);assert.equal(updated.pack.used,9);assert.match(f.pack.getRange('R17').getValue(),/× 9/);});
 test('lost save response can replay the same request without double counting',()=>{const f=fixture(),r=f.run();f.save(r,2);const count=f.writes;assert.equal(f.save(r,2).pack.used,2);assert.equal(f.writes,count);assert.throws(()=>f.save(r,1),/id_conflict/);});
 test('concurrent tabs cannot overwrite a newer backpack',()=>{const f=fixture(),r=f.run();f.save(r,2);assert.throws(()=>f.save(r,1,{requestId:'22222222-2222-4222-8222-222222222222'}),/pack_changed/);});
 test('missing master sheet gives exact waiting message and creates nothing',()=>{const f=fixture();f.books[mainId].sheets=[];const before=f.books[branchIds['2.1']].sheets.length;assert.equal(f.run().notice,'Дождитесь своего листа или напомните о нем!');assert.equal(f.run('market_branch_join',{branchId:'2.1'}).waiting,true);assert.equal(f.books[branchIds['2.1']].sheets.length,before);});
-test('explicit branch choice creates a native sheet and transfers source stats',()=>{const f=fixture();const r=f.run('market_branch_join',{branchId:'2.1'});assert.equal(r.pack.branchId,'2.1');assert.equal(r.pack.capacity,17);const s=f.books[branchIds['2.1']].sheets.find(s=>s.name==='Эшвейл');assert.equal(s.getRange('B16').getValue(),17);assert.equal(s.getRange('B23').getValue(),'✓');const n=f.books[branchIds['2.1']].sheets.length;f.run('market_branch_join',{branchId:'2.1'});assert.equal(f.books[branchIds['2.1']].sheets.length,n);});
+test('unassigned character can choose a branch and transfer source stats',()=>{const f=fixture();f.books[branchIds['2.4']].sheets=[];const r=f.run('market_branch_join',{branchId:'2.1'});assert.equal(r.pack.branchId,'2.1');assert.equal(r.pack.capacity,17);const s=f.books[branchIds['2.1']].sheets.find(s=>s.name==='Эшвейл');assert.equal(s.getRange('B16').getValue(),17);assert.equal(s.getRange('B23').getValue(),'✓');const n=f.books[branchIds['2.1']].sheets.length;f.run('market_branch_join',{branchId:'2.1'});assert.equal(f.books[branchIds['2.1']].sheets.length,n);});
 test('different characters receive all six of their own stats, never template defaults',()=>{
  for(const stats of [[17,15,13,14,12,17],[12,11,15,14,14,16],[13,16,16,13,15,10]]){
-  const f=fixture();f.main.getRange('B10:B15').setValues(stats.map(value=>[value]));f.run('market_branch_join',{branchId:'2.1'});
+  const f=fixture();f.books[branchIds['2.4']].sheets=[];f.main.getRange('B10:B15').setValues(stats.map(value=>[value]));f.run('market_branch_join',{branchId:'2.1'});
   const created=f.books[branchIds['2.1']].sheets.find(s=>s.name==='Эшвейл');assert.deepEqual(created.getRange('B16:B21').getValues(),stats.map(value=>[value]));
  }
 });
 test('blank source stats never fall back to another character or template values',()=>{const f=fixture();f.main.getRange('B10').clearContent();assert.equal(f.run().notice,'Характеристики персонажа еще не заполнены.');const before=f.books[branchIds['2.1']].sheets.length;assert.throws(()=>f.run('market_branch_join',{branchId:'2.1'}),/invalid_character_stats/);assert.equal(f.books[branchIds['2.1']].sheets.length,before);});
-test('branches keep independent contents',()=>{const f=fixture();f.save(f.run(),2);let r=f.run('market_branch_join',{branchId:'2.1'});r=f.save(r,1,{branchId:'2.1'});assert.equal(r.pack.used,1);assert.equal(f.run().pack.used,2);});
+test('assigned character cannot create or save a backpack in another branch',()=>{const f=fixture();const original=f.save(f.run(),2);const before=f.books[branchIds['2.1']].sheets.length;const r=f.run('market_inventory',{branchId:'2.1'});assert.equal(r.incorrectBranch,true);assert.equal(r.notice,'Выберите корректную ветку');assert.equal(r.pack,null);assert.throws(()=>f.run('market_branch_join',{branchId:'2.1'}),/incorrect_branch/);assert.throws(()=>f.save(original,1,{branchId:'2.1'}),/incorrect_branch/);assert.equal(f.books[branchIds['2.1']].sheets.length,before);assert.equal(f.run().pack.used,2);});
 test('manual backpack items count towards slots and are preserved',()=>{const f=fixture();f.purchase(3);f.pack.getRange('R17').setValue('Ментаты × 3');let r=f.run();assert.equal(r.pack.manualSlots,3);assert.throws(()=>f.save(r,3),/item_not_owned/);r=f.save(r,2);assert.equal(r.pack.used,5);assert.match(f.pack.getRange('R17').getValue(),/× 3/);});
 test('unknown manual items and broken capacity formulas fail safely',()=>{const f=fixture();f.pack.getRange('V17').setValue('Семейная реликвия');let r=f.run();assert.throws(()=>f.save(r,1),/manual_slots_unknown/);f.pack.invalidCapacity=true;assert.throws(()=>f.run(),/invalid_capacity/);});
 test('unknown branches, forged owners, duplicate item ids and formulas cannot write',()=>{const f=fixture(),r=f.run();assert.throws(()=>f.run('market_inventory',{user:{id:'999'}}),/not_bound/);assert.throws(()=>f.run('market_branch_join',{branchId:'9.9'}),/invalid_branch/);assert.throws(()=>f.save(r,1,{items:[{id:'count-01',quantity:1},{id:'count-01',quantity:1}]}),/invalid_pack/);f.main.getRange('H25').setFormula('=SUM(1)');assert.throws(()=>f.run(),/inventory_formula/);});

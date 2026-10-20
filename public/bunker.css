@@ -1,6 +1,9 @@
 /* Approved olive palette; background is a Fallout 3 gameplay screenshot. */
 :root{color-scheme:dark;--paper:#1b241d;--card:#3b4435;--ink:#f0e5cb;--muted:#d0ccb7;--line:#7c8369;--rust:#d6b67b;--dark:#20291f}
 html{background:#171f1a}
+button:focus,a:focus,input:focus,select:focus,summary:focus,dialog:focus,#main:focus{outline:none}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:none}
+html[data-input=keyboard] :is(button,a,input,select,summary):focus-visible{outline:1px solid var(--line);outline-offset:3px}
 body{background:none;isolation:isolate;min-height:100dvh}
 body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:linear-gradient(#151e18a8,#151e18e5),url('/assets/scenery/rivet-city-market.webp') center/cover no-repeat}
 .masthead{min-height:90px}.wordmark{color:var(--ink)}.brand-cap{background:var(--rust);color:#20291f}.wallet-label,.wordmark small{color:var(--muted)}
@@ -24,3 +27,16 @@ dialog{background:var(--card);border-color:#8e9275;border-radius:0;box-shadow:0 
 @media(max-width:760px){.intro{gap:22px}.inventory-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.colophon{font-size:10px}}
 @media(max-width:520px){.intro{display:block}.intro h1{font-size:43px;max-width:320px}.intro p{font-size:14px}.market-art{box-shadow:4px 5px 0 #10171399}.market-art img{aspect-ratio:2}.shop-art{aspect-ratio:1.8}.shop-info h3{font-size:23px;min-height:58px}.shop-info p{font-size:11px}.shop-info .shop-foot{font-size:10px}.sheet-body{padding:26px 20px calc(26px + var(--safe-bottom))}.entry-screen .sheet-body{padding:30px 22px calc(28px + var(--safe-bottom))}.entry-screen h2{font-size:28px}.inventory-grid{gap:11px}.inventory-item{padding:12px}.inventory-item img{height:112px}.inventory-item h2{font-size:13px}.inventory-item p{font-size:11px}.cart-foot{grid-template-columns:minmax(0,1fr) auto}.cart-foot .primary{min-width:120px;padding:12px}.history-head{flex-wrap:wrap}.history-bottom{flex-wrap:wrap}.colophon span:last-child{max-width:165px}}
 @media(max-width:360px){.cart-foot{grid-template-columns:1fr}.cart-foot .primary{width:100%}.balance-check{flex-wrap:wrap}.shop-info h3{font-size:21px}.entry-screen h2{font-size:26px}.entry-screen .sheet-body{padding-left:20px;padding-right:20px}}
+.backpack-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
+.backpack-controls label{min-width:0}
+.backpack-actions{grid-column:1/-1;display:flex;align-items:center;gap:18px;padding:2px 0}
+.backpack-open{display:inline-flex;align-items:center;gap:12px;min-height:72px;padding:4px 14px 4px 0;background:transparent;color:var(--ink);text-align:left;border:0}
+.backpack-open img{height:68px;width:62px;object-fit:contain;filter:drop-shadow(0 3px 4px #0005)}
+.backpack-open span{font-size:15px;font-weight:600}
+.backpack-actions .pack-refresh{flex:0 0 auto;min-width:0;min-height:44px;margin-left:auto;padding:10px 14px;gap:8px}
+.pack-refresh svg{height:18px;width:18px}
+.pack-refresh[aria-busy=true] svg{animation:pack-refresh-spin 1.2s linear infinite}
+.pack-summary-heading{flex:1;min-width:0}
+.backpack-notice[role=alert]{border-color:var(--rust)}
+@keyframes pack-refresh-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.pack-refresh[aria-busy=true] svg{animation:none}}

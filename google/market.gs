@@ -153,8 +153,6 @@ function fmMirror_(entry,bank,report) {
     Sheets.Spreadsheets.batchUpdate({requests:[{appendCells:{sheetId:report.orders.getSheetId(),rows:[order],fields:'userEnteredValue'}},{appendCells:{sheetId:report.items.getSheetId(),rows:items,fields:'userEnteredValue'}}]},FM_REPORT_ID);
   }
   Sheets.Spreadsheets.batchUpdate({requests:[{updateCells:{start:{sheetId:bank.ledger.getSheetId(),rowIndex:entry.row-1,columnIndex:6},rows:[fmRow_([true])],fields:'userEnteredValue'}}]},FM_BANK_ID);
-  // Inventory is an idempotent mirror: an outage must not undo a committed payment.
-  if(typeof fmSyncInventoryForOrder_==='function'){try{fmSyncInventoryForOrder_(bank,o);}catch(e){}}
 }
 function fmCheckout_(p,bank,report,user,catalog) {
   if(typeof p.orderId!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(p.orderId))fmError_('invalid_request');
@@ -162,8 +160,7 @@ function fmCheckout_(p,bank,report,user,catalog) {
   if(old) {
     if(String(old.values[3])!==user.id || old.values[1]!==fingerprint)fmError_('id_conflict');
     const order=fmParseOrder_(old);
-    if(old.values[6]!==true){try{fmMirror_(old,bank,report);}catch(e){}}
-    return {ok:true,order:order,replayed:true};
+    return {ok:true,order:order,replayed:true,reportSynced:old.values[6]===true};
   }
   if(p.revision!==catalog.revision)fmError_('catalog_changed');
   const shop=catalog.shops.find(s=>s.id===p.shopId);if(!shop)fmError_('invalid_cart');
@@ -186,14 +183,14 @@ function fmCheckout_(p,bank,report,user,catalog) {
     {updateCells:{start:{sheetId:bank.sheet.getSheetId(),rowIndex:character.row-1,columnIndex:8},rows:[{values:[{userEnteredValue:{numberValue:expense+total},note:noteLines.join('\n')}]}],fields:'userEnteredValue,note'}},
     {appendCells:{sheetId:bank.ledger.getSheetId(),rows:[fmRow_([order.id,fingerprint,character.id,user.id,order.utc,raw,false])],fields:'userEnteredValue'}}
   ]},FM_BANK_ID);
-  SpreadsheetApp.flush();
-  const entry=fmFindOrder_(bank.ledger,order.id);if(!entry)fmError_('connection_failed');
-  let reportSynced=true;try{fmMirror_(entry,bank,report);}catch(e){reportSynced=false;}
-  return {ok:true,order:order,reportSynced:reportSynced};
+  // The authoritative receipt and debit are committed. Mirrors are retried by
+  // the server worker; their latency must never delay a successful payment.
+  return {ok:true,order:order,reportSynced:false};
 }
 function marketDispatch_(p) {
-  const lock=LockService.getScriptLock();
-  if(!lock.tryLock(20000))return {ok:false,error:'busy'};
+  const readOnly=['market_state','market_order','market_history','market_inventory'].indexOf(p.action)>=0;
+  const lock=readOnly?null:LockService.getScriptLock();
+  if(lock&&!lock.tryLock(p.action==='market_reconcile'?1:20000))return {ok:false,error:'busy'};
   try {
     const bank=fmBank_(),report=fmReport_();
     if(p.action==='market_verify') {
@@ -203,10 +200,10 @@ function marketDispatch_(p) {
       return {ok:true,revision:catalog.revision,characters:bank.characters.length,inventoryVersion:typeof fmInventoryDispatch_==='function'?1:0};
     }
     if(p.action==='market_reconcile') {
-      const pending=fmRows_(bank.ledger,7).map((r,i)=>({values:r,row:i+2})).filter(e=>e.values[0]&&e.values[6]!==true).slice(0,30);
+      const pending=fmRows_(bank.ledger,7).map((r,i)=>({values:r,row:i+2})).filter(e=>e.values[0]&&e.values[6]!==true).slice(0,5);
       let synced=0;for(const e of pending){fmMirror_(e,bank,report);synced++;}
-      if(typeof fmSyncInventories_==='function')fmSyncInventories_(bank);
-      return {ok:true,synced:synced};
+      const inventory=typeof fmSyncInventories_==='function'?fmSyncInventories_(bank):{synced:0,remaining:0};
+      return {ok:true,synced:synced,inventorySynced:inventory.synced,more:pending.length>=5||inventory.synced>0&&inventory.remaining>0};
     }
     const user=fmUser_(p.user);
     if(['market_inventory','market_branch_join','market_pack_save'].indexOf(p.action)>=0&&typeof fmInventoryDispatch_==='function')return fmInventoryDispatch_(p,bank,report,user);
@@ -224,7 +221,7 @@ function marketDispatch_(p) {
     }
     fmError_('invalid_request');
   } catch(error) {
-    const allowed=['busy','connection_failed','schema_changed','unauthorized','character_not_found','character_taken','character_not_allowed','username_required','already_bound','not_bound','invalid_balance','balance_formula','invalid_cart','invalid_request','catalog_changed','not_enough_caps','id_conflict','order_not_found','invalid_branch','invalid_pack','pack_full','pack_changed','item_not_owned','invalid_capacity','inventory_formula','inventory_too_large','character_sheet_missing','branch_sheet_missing','template_not_found','invalid_character_stats','manual_slots_unknown'];
+    const allowed=['busy','connection_failed','schema_changed','unauthorized','character_not_found','character_taken','character_not_allowed','username_required','already_bound','not_bound','invalid_balance','balance_formula','invalid_cart','invalid_request','catalog_changed','not_enough_caps','id_conflict','order_not_found','invalid_branch','incorrect_branch','invalid_pack','pack_full','pack_changed','item_not_owned','invalid_capacity','inventory_formula','inventory_too_large','character_sheet_missing','branch_sheet_missing','template_not_found','invalid_character_stats','manual_slots_unknown'];
     return {ok:false,error:allowed.indexOf(String(error.message))>=0?String(error.message):'connection_failed'};
-  } finally {lock.releaseLock();}
+  } finally {if(lock)lock.releaseLock();}
 }

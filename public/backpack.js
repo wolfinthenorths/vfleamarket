@@ -4,7 +4,8 @@
   const sorted = items => [...items].sort((a,b)=>a.id.localeCompare(b.id)).map(i=>({id:i.id,quantity:i.quantity}));
   function render(options) {
     dispose();
-    const {main, api, esc, counted, scope, authenticated, catalog} = options;
+    const {main, api, esc, counted, scope, authenticated, catalog, notify=()=>{}} = options;
+    const wrongBranch='Выберите корректную ветку';
     main.innerHTML='<h1 class="page-title">Инвентарь</h1><p class="page-lead">Все вещи персонажа и рюкзак для выбранной главы.</p><section id="backpack-view"><div class="loading-card">Открываем инвентарь…</div></section>';
     const root=document.getElementById('backpack-view');
     if(!authenticated){root.innerHTML='<section class="empty"><h2>Что удалось раздобыть?</h2><p>Откройте магазин через бота, чтобы увидеть свои вещи.</p><a class="primary" href="https://t.me/vfleamarketbot">К торговым рядам ↗</a></section>';return;}
@@ -27,6 +28,7 @@
         else if(JSON.stringify(sorted(old.items))!==JSON.stringify(sorted(result.pack.items))||JSON.stringify(old.manualItems)!==JSON.stringify(result.pack.manualItems)||JSON.stringify(old.manualUnknown)!==JSON.stringify(result.pack.manualUnknown))conflict=true;
       }
       data=result;
+      if(result.incorrectBranch)message=wrongBranch;
       if(!chapter)chapter=result.branches?.at(-1)?.chapter||'';
       paint();
     }
@@ -36,20 +38,28 @@
       const chapters=[...new Set(data.branches.map(b=>b.chapter))],branches=data.branches.filter(b=>b.chapter===chapter),pack=data.pack,current=used();
       const unavailable=busy||Boolean(pending)||!pack||conflict||Boolean(pack.manualUnknown.length);
       root.innerHTML=`<div class="backpack-controls"><label>Глава<select id="pack-chapter">${chapters.map(c=>`<option value="${esc(c)}" ${c===chapter?'selected':''}>Глава ${esc(c)}</option>`).join('')}</select></label><label>Ветка<select id="pack-branch"><option value="">Выберите ветку!</option>${branches.map(b=>`<option value="${esc(b.id)}" ${b.id===branchId?'selected':''}>${esc(b.id)}</option>`).join('')}</select></label><button class="secondary" data-pack-open ${!branchId||busy||pending?'disabled':''}>${busy?'Подключаем…':'Открыть рюкзак'}</button></div>${!pack?'<div class="backpack-notice" role="status">Выберите ветку!</div>':`<section class="pack-summary"><div><span class="eyebrow">Глава ${esc(pack.chapter)} · ветка ${esc(pack.branchId)}</span><h2>В рюкзаке: <span class="${current>pack.capacity?'pack-overflow':''}">${current} / ${pack.capacity}</span> слотов</h2></div><button class="secondary" data-pack-refresh ${busy?'disabled':''}>Обновить</button><progress max="${Math.max(1,pack.capacity)}" value="${Math.min(current,pack.capacity)}" aria-label="Занятые слоты"></progress>${current>pack.capacity?'<p class="pack-overflow" role="status">Перегруз. Уберите часть вещей перед сохранением.</p>':''}${pack.manualItems.length?`<p>Уже записано в таблице: ${pack.manualItems.map(i=>esc(i.name)+' × '+i.quantity).join(', ')}. Занято ${pack.manualSlots} сл.</p>`:''}${pack.manualUnknown.length?`<p class="pack-overflow">Нужно уточнить слоты у мастера: ${pack.manualUnknown.map(esc).join(', ')}.</p>`:''}<button class="primary" data-pack-save ${unavailable||!dirty()||current>pack.capacity?'disabled':''}>${busy?'Сохраняем…':'Сохранить рюкзак'}</button></section>`}${conflict?'<div class="backpack-notice" role="alert">Рюкзак изменился в таблице. Загрузите актуальный набор перед сохранением. <button class="text-button" data-pack-reset>Загрузить набор</button></div>':''}${message?`<p class="backpack-notice" role="status">${esc(message)}</p>`:''}${pending?'<button class="primary wide" data-pack-retry>Проверить сохранение рюкзака</button>':''}${data.manualUnknown?.length?`<p class="page-lead">В таблице также есть записи, для которых нужно уточнить предмет и слоты: ${data.manualUnknown.map(esc).join(', ')}.</p>`:''}<div class="section-head"><h2>Вещи персонажа</h2><small>${data.items.length?counted(data.items.length,'позиция','позиции','позиций'):'ПОКА ПУСТО'}</small></div>${data.items.length?`<section class="inventory-grid" aria-label="Предметы в инвентаре">${data.items.map(i=>`<article class="inventory-item">${itemImages[i.id]?`<img src="${esc(itemImages[i.id])}" alt="${esc(i.name)}" loading="lazy">`:''}<h2>${esc(i.name)}</h2><p>Всего: ${i.quantity} · ${counted(i.slots,'слот','слота','слотов')} за шт.</p><div class="inventory-pack-row"><span>В рюкзак</span><div class="quantity"><button data-pack-item="${esc(i.id)}" data-delta="-1" aria-label="Убрать из рюкзака: ${esc(i.name)}" ${unavailable||!draft[i.id]?'disabled':''}>−</button><span>${draft[i.id]||0}</span><button data-pack-item="${esc(i.id)}" data-delta="1" aria-label="В рюкзак: ${esc(i.name)}" ${unavailable||(draft[i.id]||0)>=available(i)||current+i.slots>(pack?.capacity||0)?'disabled':''}>+</button></div></div></article>`).join('')}</section>`:'<section class="empty"><h2>Пока пусто</h2><p>Покупки автоматически появятся здесь и в общей сводке.</p><a class="primary" href="#">К магазинам →</a></section>'}<details class="inventory-receipts"><summary data-pack-receipts>Квитанции</summary><div id="pack-receipts">${receipts||'<p>Открываем записи…</p>'}</div></details>`;
+      root.querySelector('[data-pack-open]').remove();
+      root.querySelector('.pack-summary [data-pack-refresh]')?.remove();
+      root.querySelector('.pack-summary > div')?.classList.add('pack-summary-heading');
+      root.querySelector('.backpack-controls').insertAdjacentHTML('beforeend',`<div class="backpack-actions"><button type="button" class="backpack-open" data-pack-open aria-label="Открыть рюкзак"><img src="/assets/ui/backpack.png" alt="" width="62" height="68"><span>${busy?'Подключаем…':'Рюкзак'}</span></button><button type="button" class="secondary pack-refresh" data-pack-refresh aria-busy="${loading}" ${busy||loading?'disabled':''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5.3 7a8 8 0 0 1 13.4-1L20 12M4 12l1.3 6A8 8 0 0 0 18.7 17"/></svg><span>Обновить</span></button></div>`);
       for(const select of root.querySelectorAll('select'))select.disabled=busy||Boolean(pending)||Boolean(dirty());
       root.querySelector('[data-pack-open]').disabled=!branchId||busy||Boolean(pending)||Boolean(dirty());
       if(dirty())root.insertAdjacentHTML('beforeend','<button class="text-button" data-pack-reset>Отменить изменения рюкзака</button>');
     }
     async function refresh(reset=false){
-      if(loading||busy||!alive())return;loading=true;
+      if(loading||busy||!alive())return;loading=true;paint();
       try{adopt(await api('inventory',{branchId}),reset);}catch(e){if(alive()){message=e.message;if(data)paint();else root.innerHTML=`<section class="empty"><p>${esc(message)}</p><button class="secondary" data-pack-refresh>Попробовать снова</button></section>`;}}
-      finally{loading=false;}
+      finally{loading=false;paint();}
     }
     async function openBranch(){
       if(!branchId||busy||pending||dirty())return;
+      const selected=data.branches.find(b=>b.id===branchId);
+      if(selected&&!selected.hasSheet&&data.branches.some(b=>b.chapter===selected.chapter&&b.hasSheet)){
+        message=wrongBranch;notify(message);window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');paint();return;
+      }
       busy=true;message='';paint();
       try{const result=await api('branch_join',{branchId});adopt(result,true);message=result.waiting?'Дождитесь своего листа или напомните о нем!':'Рюкзак открыт.';}
-      catch(e){message=e.message;}finally{busy=false;paint();}
+      catch(e){message=e.message;if(e.code==='incorrect_branch')notify(message);}finally{busy=false;paint();}
     }
     async function save(){
       if(busy||!data?.pack)return;
@@ -62,7 +72,7 @@
       try{const result=await api('pack_save',pending);pending=null;try{localStorage.removeItem(pendingKey);}catch{}adopt(result,true);message='Рюкзак сохранен в таблице.';}
       catch(e){
         message=e.message;
-        if(['invalid_pack','item_not_owned','pack_full','pack_changed','manual_slots_unknown','invalid_capacity','character_sheet_missing','branch_sheet_missing','invalid_branch'].includes(e.code)){pending=null;try{localStorage.removeItem(pendingKey);}catch{}busy=false;await refresh();}
+        if(['invalid_pack','item_not_owned','pack_full','pack_changed','manual_slots_unknown','invalid_capacity','character_sheet_missing','branch_sheet_missing','invalid_branch','incorrect_branch'].includes(e.code)){pending=null;try{localStorage.removeItem(pendingKey);}catch{}busy=false;await refresh();}
       }finally{busy=false;paint();}
     }
     root.addEventListener('change',event=>{

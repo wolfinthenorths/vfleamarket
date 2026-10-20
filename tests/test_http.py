@@ -82,6 +82,18 @@ class HTTPTests(unittest.TestCase):
         self.assertTrue(json.loads(raw)["replayed"])
         call.assert_called_once_with("order",unittest.mock.ANY,orderId=order["id"])
 
+    def test_valid_cart_uses_one_bridge_call_and_wakes_mirror(self):
+        item=server.CATALOG["shops"][0]["items"][0]
+        order={"id":"22222222-2222-4222-8222-222222222222","shopId":"count","revision":server.CATALOG["revision"],"total":item["price"],"userId":"12345","lines":[{"id":item["id"],"quantity":1}]}
+        body={"orderId":order["id"],"shopId":"count","revision":order["revision"],"expectedTotal":order["total"],"items":order["lines"]}
+        server.RECONCILE_WAKE.clear()
+        with patch.object(server.BRIDGE,"call",return_value={"ok":True,"order":order}) as call:
+            status,_,_=self.request("POST","/api/checkout",body,auth=True)
+        self.assertEqual(status,200)
+        self.assertEqual(call.call_count,1)
+        self.assertEqual(call.call_args.args[0],"checkout")
+        self.assertTrue(server.RECONCILE_WAKE.is_set())
+
     def test_wrong_cart_cannot_reuse_receipt(self):
         order={"id":"11111111-1111-4111-8111-111111111111","shopId":"count","revision":"older","total":230,"userId":"12345","lines":[{"id":"count-01","quantity":1}]}
         with patch.object(server.BRIDGE,"call",return_value={"ok":True,"order":order}):

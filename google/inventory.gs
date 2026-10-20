@@ -9,6 +9,21 @@ const FMIN_BRANCHES = [
 const FMIN_MARK = '\n[FM_ITEMS_V1]';
 const FMIN_PACK = '\n[FM_PACK_V1]';
 const FMIN_WAIT = 'Дождитесь своего листа или напомните о нем!';
+const FMIN_WRONG_BRANCH = 'Выберите корректную ветку';
+const FMIN_BOOK_CACHE = {}, FMIN_BRANCH_CACHE = {};
+
+function fminBook_(id) {return FMIN_BOOK_CACHE[id]||(FMIN_BOOK_CACHE[id]=SpreadsheetApp.openById(id));}
+function fminBranchStates_(character) {
+  const key=character.id+':'+character.name;
+  if(!FMIN_BRANCH_CACHE[key])FMIN_BRANCH_CACHE[key]=FMIN_BRANCHES.map(branch=>{
+    const book=fminBook_(branch.book);
+    return {id:branch.id,chapter:branch.chapter,book:book,sheet:fminFindSheet_(book,character.name)};
+  });
+  return FMIN_BRANCH_CACHE[key];
+}
+function fminWrongBranch_(branch,states) {
+  return !states.find(b=>b.id===branch.id).sheet&&states.some(b=>b.chapter===branch.chapter&&b.sheet);
+}
 
 function fminNorm_(s) {return String(s||'').trim().toLowerCase().replace(/ё/g,'е').replace(/[«»"“”]/g,'').replace(/\s+/g,' ');}
 function fminHash_(value) {return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,JSON.stringify(value),Utilities.Charset.UTF_8).map(b=>('0'+((b+256)%256).toString(16)).slice(-2)).join('');}
@@ -26,7 +41,7 @@ function fminFindSheet_(book,name) {
   if(matches.length>1)fmError_('schema_changed');
   return matches[0]||null;
 }
-function fminSource_(character) {return fminFindSheet_(SpreadsheetApp.openById(FMIN_BOOK),character.name);}
+function fminSource_(character) {return fminFindSheet_(fminBook_(FMIN_BOOK),character.name);}
 function fminStatsReady_(source) {return source.getRange('B10:B15').getValues().every(row=>typeof row[0]==='number'&&Number.isFinite(row[0]));}
 function fminNote_(note,marker) {
   const pos=String(note||'').indexOf(marker);
@@ -34,9 +49,9 @@ function fminNote_(note,marker) {
   let data;try{data=JSON.parse(String(note).slice(pos+marker.length));}catch(e){fmError_('schema_changed');}
   return {prefix:String(note).slice(0,pos),data:data};
 }
-function fminCell_(sheet,row,col) {
-  const range=sheet.getRange(row,col),value=String(range.getDisplayValue()||''),note=range.getNote(),parsed=fminNote_(note,FMIN_MARK);
-  if(range.getFormula())fmError_('inventory_formula');
+function fminCell_(row,col,cell) {
+  const value=String(cell.formattedValue||''),note=cell.note||'',parsed=fminNote_(note,FMIN_MARK);
+  if(cell.userEnteredValue&&cell.userEnteredValue.formulaValue)fmError_('inventory_formula');
   let base=value;
   if(parsed.data){
     if(value===parsed.data.last)base=String(parsed.data.base||'');
@@ -49,7 +64,16 @@ function fminCell_(sheet,row,col) {
 }
 function fminCells_(sheet,pack) {
   const columns=pack?[15,16,18,20,22]:[5,6,8,10,12],rows=pack?[17,19,21]:[25,27,29];
-  return columns.map(col=>rows.map(row=>fminCell_(sheet,row,col)));
+  const name="'"+sheet.getName().replace(/'/g,"''")+"'!",startRow=pack?17:25,startCol=pack?15:5;
+  // Read text, notes and formulas in one consistent snapshot instead of 45 RPCs.
+  const result=Sheets.Spreadsheets.get(sheet.getParent().getId(),{
+    ranges:[name+(pack?'O17:V21':'E25:L29')],
+    fields:'sheets(data(rowData(values(formattedValue,userEnteredValue,note))))'
+  });
+  const grid=result.sheets&&result.sheets[0]&&result.sheets[0].data&&result.sheets[0].data[0];
+  if(!grid)fmError_('schema_changed');
+  const values=grid.rowData||[];
+  return columns.map(col=>rows.map(row=>fminCell_(row,col,(values[row-startRow]&&values[row-startRow].values||[])[col-startCol]||{})));
 }
 function fminWritePlan_(sheet,cells,items) {
   const groups=[[],[],[],[],[]];
@@ -104,10 +128,16 @@ function fmSyncInventoryForOrder_(bank,order) {
   fminOwned_(bank,character,source,fminIndex_(),true);return true;
 }
 function fmSyncInventories_(bank) {
-  const ids={};fmRows_(bank.ledger,7).forEach(row=>{if(row[0])ids[String(row[2])]=true;});
+  const ids={};fmRows_(bank.ledger,7).forEach(row=>{if(row[0])(ids[String(row[2])]||(ids[String(row[2])]=[])).push(row[0]);});
+  const cache=CacheService.getScriptCache(),pending=bank.characters.filter(c=>ids[c.id]).filter(c=>cache.get('fm:inventory:'+c.id)!==fminHash_(ids[c.id]));
   let synced=0;
-  bank.characters.filter(c=>ids[c.id]).forEach(character=>{try{const source=fminSource_(character);if(source){fminOwned_(bank,character,source,fminIndex_(),true);synced++;}}catch(e){}});
-  return synced;
+  // Cache only mirror progress, never balances, ownership, stats or capacity.
+  // A lost/evicted cache simply causes another idempotent mirror pass.
+  for(const character of pending){
+    try{const source=fminSource_(character);if(source){fminOwned_(bank,character,source,fminIndex_(),true);cache.put('fm:inventory:'+character.id,fminHash_(ids[character.id]),21600);synced++;}}catch(e){}
+    if(synced>=1)break;
+  }
+  return {synced:synced,remaining:Math.max(0,pending.length-synced)};
 }
 function fminBranch_(id) {const branch=FMIN_BRANCHES.find(b=>b.id===id);if(!branch)fmError_('invalid_branch');return branch;}
 function fminPack_(branch,sheet,index) {
@@ -129,22 +159,19 @@ function fminInventory_(p,bank,report,user) {
   const character=fmCurrent_(bank,report,user);if(!character)fmError_('not_bound');
   const source=fminSource_(character);
   if(!source)return {ok:true,character:{id:character.id,name:character.name},waiting:true,notice:FMIN_WAIT,items:[],branches:[],pack:null};
-  const index=fminIndex_(),owned=fminOwned_(bank,character,source,index,true);
+  const index=fminIndex_(),owned=fminOwned_(bank,character,source,index,false);
   if(!fminStatsReady_(source))return {ok:true,character:{id:character.id,name:character.name},waiting:true,notice:'Характеристики персонажа еще не заполнены.',items:owned.items,branches:[],pack:null};
-  const books={};
-  const branches=FMIN_BRANCHES.map(branch=>{
-    const book=SpreadsheetApp.openById(branch.book),sheet=fminFindSheet_(book,character.name);books[branch.id]={book:book,sheet:sheet};
-    return {id:branch.id,chapter:branch.chapter,hasSheet:Boolean(sheet)};
-  });
+  const states=fminBranchStates_(character),branches=states.map(b=>({id:b.id,chapter:b.chapter,hasSheet:Boolean(b.sheet)}));
   const existing=branches.filter(b=>b.hasSheet),selected=p.branchId?fminBranch_(p.branchId):existing.length===1?fminBranch_(existing[0].id):null;
-  const target=selected?books[selected.id].sheet:null;
+  const incorrect=selected&&fminWrongBranch_(selected,states);
+  const target=selected&&!incorrect?states.find(b=>b.id===selected.id).sheet:null;
   const pack=target?fminPack_(selected,target,index):null;
-  return {ok:true,character:{id:character.id,name:character.name},waiting:false,notice:pack?'':'Выберите ветку!',items:owned.items,manualUnknown:owned.manualUnknown,branches:branches,pack:pack?fminPublicPack_(pack):null};
+  return {ok:true,character:{id:character.id,name:character.name},waiting:false,incorrectBranch:Boolean(incorrect),notice:incorrect?FMIN_WRONG_BRANCH:pack?'':'Выберите ветку!',items:owned.items,manualUnknown:owned.manualUnknown,branches:branches,pack:pack?fminPublicPack_(pack):null};
 }
 function fminTemplate_(branch,characterClass) {
   const candidates=[branch].concat(FMIN_BRANCHES.filter(b=>b.id!==branch.id));
   for(const b of candidates){
-    const sheets=SpreadsheetApp.openById(b.book).getSheets();
+    const sheets=fminBook_(b.book).getSheets();
     for(const s of sheets){if(fminNorm_(s.getRange('C2').getDisplayValue())===fminNorm_(characterClass)&&s.getRange('O14').getDisplayValue()==='Рюкзак')return s;}
   }
   fmError_('template_not_found');
@@ -152,8 +179,10 @@ function fminTemplate_(branch,characterClass) {
 function fminJoin_(p,bank,report,user) {
   const character=fmCurrent_(bank,report,user);if(!character)fmError_('not_bound');
   const source=fminSource_(character);if(!source)return {ok:true,waiting:true,notice:FMIN_WAIT,items:[],branches:[],pack:null};
-  const branch=fminBranch_(p.branchId),book=SpreadsheetApp.openById(branch.book);
-  if(!fminFindSheet_(book,character.name)){
+  if(!fminStatsReady_(source))fmError_('invalid_character_stats');
+  const branch=fminBranch_(p.branchId),states=fminBranchStates_(character),target=states.find(b=>b.id===branch.id),book=target.book;
+  if(fminWrongBranch_(branch,states))fmError_('incorrect_branch');
+  if(!target.sheet){
     const characterClass=String(source.getRange('C2').getValue()),template=fminTemplate_(branch,characterClass);
     const stats=source.getRange('B10:B15').getValues(),skills=source.getRange('B17:B36').getValues();
     if(stats.some(row=>typeof row[0]!=='number'||!Number.isFinite(row[0])))fmError_('invalid_character_stats');
@@ -181,14 +210,15 @@ function fminJoin_(p,bank,report,user) {
     created.getRange('O14').clearNote();created.getRange('R11:S12').clearContent();
     const perkRules=created.getRange('F23:J40').getDataValidations();
     for(let r=0;r<perkRules.length;r++)for(let c=0;c<perkRules[r].length;c++)if(perkRules[r][c])created.getRange(r+23,c+6).setValue('пусто');
-    created.setName(character.name);SpreadsheetApp.flush();
+    created.setName(character.name);target.sheet=created;SpreadsheetApp.flush();
   }
   return fminInventory_(p,bank,report,user);
 }
 function fminSave_(p,bank,report,user) {
   const character=fmCurrent_(bank,report,user);if(!character)fmError_('not_bound');
   const source=fminSource_(character);if(!source)fmError_('character_sheet_missing');
-  const branch=fminBranch_(p.branchId),book=SpreadsheetApp.openById(branch.book),sheet=fminFindSheet_(book,character.name);
+  const branch=fminBranch_(p.branchId),states=fminBranchStates_(character),sheet=states.find(b=>b.id===branch.id).sheet;
+  if(fminWrongBranch_(branch,states))fmError_('incorrect_branch');
   if(!sheet)fmError_('branch_sheet_missing');
   const index=fminIndex_(),owned=fminOwned_(bank,character,source,index,true),pack=fminPack_(branch,sheet,index);
   if(!Array.isArray(p.items)||p.items.length>136||typeof p.requestId!=='string'||!/^[a-f0-9-]{36}$/.test(p.requestId))fmError_('invalid_pack');
