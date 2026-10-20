@@ -65,11 +65,27 @@ function fmCurrent_(bank,report,user) {
   if(!Number.isSafeInteger(character.balance)||character.balance<0)fmError_('invalid_balance');
   return character;
 }
+function fmUsername_(value) {
+  const name=String(value||'').trim().replace(/^@/,'').toLowerCase();
+  return /^[a-z0-9_]{5,32}$/.test(name)?name:'';
+}
+function fmEligible_(bank,report,user) {
+  const username=fmUsername_(user.username);
+  if(!username)return [];
+  const rows=fmRows_(report.players,6);
+  const matches=rows.filter(r=>!String(r[1]) && fmUsername_(r[2])===username);
+  if(matches.length>1)fmError_('schema_changed');
+  return matches.map(r=>{
+    const character=bank.characters.find(c=>c.id===String(r[3]));
+    if(!character || rows.filter(other=>String(other[3])===character.id).length!==1)fmError_('schema_changed');
+    return {id:character.id,name:character.name};
+  });
+}
 function fmState_(bank,report,user) {
   const character=fmCurrent_(bank,report,user);
-  const used=fmRows_(report.players,6).filter(r=>String(r[1])).map(r=>String(r[3]));
   return {ok:true,character:character?{id:character.id,name:character.name}:null,balance:character?character.balance:null,
-    availableCharacters:character?[]:bank.characters.filter(c=>used.indexOf(c.id)<0).map(c=>({id:c.id,name:c.name}))};
+    availableCharacters:character?[]:fmEligible_(bank,report,user),
+    bindingNotice:character?'':!fmUsername_(user.username)?'Для первой привязки нужен Telegram username. Укажите его в настройках Telegram и сообщите мастеру.':'Если вашего персонажа нет в списке, попросите мастера проверить ваш Telegram username на листе «Игроки». '};
 }
 function fmBind_(p,bank,report,user) {
   const current=fmCurrent_(bank,report,user);
@@ -83,11 +99,29 @@ function fmBind_(p,bank,report,user) {
   rows.forEach((r,i)=>{if(String(r[3])===character.id)matches.push({r:r,row:i+2});});
   if(matches.length>1)fmError_('schema_changed');
   if(matches.length && String(matches[0].r[1]) && String(matches[0].r[1])!==user.id)fmError_('character_taken');
+  if(!fmUsername_(user.username))fmError_('username_required');
+  if(!fmEligible_(bank,report,user).some(c=>c.id===character.id))fmError_('character_not_allowed');
   const row=fmRow_([character.name,user.id,user.username?'@'+user.username:'',character.id,fmNow_(),'Привязан']);
   const request=matches.length ? {updateCells:{start:{sheetId:report.players.getSheetId(),rowIndex:matches[0].row-1,columnIndex:0},rows:[row],fields:'userEnteredValue'}} : {appendCells:{sheetId:report.players.getSheetId(),rows:[row],fields:'userEnteredValue'}};
   Sheets.Spreadsheets.batchUpdate({requests:[request]},FM_REPORT_ID);
   SpreadsheetApp.flush();
   return fmState_(bank,report,user);
+}
+/** Read-only editor smoke check. Never binds an account or buys an item. */
+function marketCheckRoster() {
+  const bank=fmBank_(),report=fmReport_(),rows=fmRows_(report.players,6);
+  let bound=0,ready=0,missing=0;
+  for(const row of rows) {
+    if(!String(row[3]))continue;
+    if(String(row[1])){bound++;continue;}
+    if(!fmUsername_(row[2])){missing++;continue;}
+    const eligible=fmEligible_(bank,report,{id:'9007199254740990',username:fmUsername_(row[2])});
+    if(eligible.length!==1 || eligible[0].id!==String(row[3]))fmError_('schema_changed');
+    ready++;
+  }
+  const result={ok:true,bound:bound,ready:ready,missingUsername:missing};
+  console.log(JSON.stringify(result));
+  return result;
 }
 function fmFingerprint_(p,user) {
   if(!Array.isArray(p.items) || !p.items.length || p.items.length>40)fmError_('invalid_cart');
@@ -186,7 +220,7 @@ function marketDispatch_(p) {
     }
     fmError_('invalid_request');
   } catch(error) {
-    const allowed=['busy','connection_failed','schema_changed','unauthorized','character_not_found','character_taken','already_bound','not_bound','invalid_balance','balance_formula','invalid_cart','invalid_request','catalog_changed','not_enough_caps','id_conflict','order_not_found'];
+    const allowed=['busy','connection_failed','schema_changed','unauthorized','character_not_found','character_taken','character_not_allowed','username_required','already_bound','not_bound','invalid_balance','balance_formula','invalid_cart','invalid_request','catalog_changed','not_enough_caps','id_conflict','order_not_found'];
     return {ok:false,error:allowed.indexOf(String(error.message))>=0?String(error.message):'connection_failed'};
   } finally {lock.releaseLock();}
 }

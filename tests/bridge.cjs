@@ -54,4 +54,32 @@ test('changing Telegram account cannot read or replay someone else receipt',()=>
 test('expired catalog cannot buy, but can replay an old paid order',()=>{const f=fixture();assert.equal(f.run({revision:'0000000000000000'}).error,'catalog_changed');f.run();f.setRevision('9999999999999999');assert.equal(f.run().replayed,true);});
 test('expenses formula and script lock both block a purchase',()=>{const f=fixture();f.bank.formulas['2:9']='=10';assert.equal(f.run().error,'balance_formula');delete f.bank.formulas['2:9'];f.flags.locked=true;assert.equal(f.run().error,'busy');assert.equal(f.flags.bankCommits,0);});
 test('initial claim is unique and subsequent account switching is blocked',()=>{const f=fixture();assert.equal(f.run({action:'market_bind',user:{id:'67890',username:'other'},characterId:f.bank.rows[1][10]}).error,'character_taken');assert.equal(f.run({action:'market_bind',characterId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'}).error,'already_bound');});
+test('first claim requires the roster username and records the signed numeric id',()=>{
+ const f=fixture();f.players.rows[1][1]='';f.players.rows[1][2]='@PlAyEr';
+ const state=f.run({action:'market_state'});assert.equal(state.availableCharacters.length,1);assert.equal(state.availableCharacters[0].id,f.bank.rows[1][10]);
+ assert.equal(f.run({action:'market_bind',characterId:f.bank.rows[1][10]}).ok,true);
+ assert.equal(f.players.rows[1][1],'12345');assert.equal(f.players.rows[1][2],'@player');assert.equal(f.flags.bankCommits,0);
+});
+test('wrong username cannot see or claim an unbound character',()=>{
+ const f=fixture();f.players.rows[1][1]='';
+ const user={id:'67890',username:'other'};
+ assert.equal(f.run({action:'market_state',user}).availableCharacters.length,0);
+ assert.equal(f.run({action:'market_bind',user,characterId:f.bank.rows[1][10]}).error,'character_not_allowed');
+ assert.equal(f.players.rows[1][1],'');assert.equal(f.flags.bankCommits,0);
+});
+test('blank roster username and missing Telegram username cannot claim',()=>{
+ const f=fixture();f.players.rows[1][1]='';f.players.rows[1][2]='';
+ assert.equal(f.run({action:'market_bind',characterId:f.bank.rows[1][10]}).error,'character_not_allowed');
+ assert.equal(f.run({action:'market_bind',user:{id:'12345',username:''},characterId:f.bank.rows[1][10]}).error,'username_required');
+});
+test('duplicate roster mapping fails closed without changing ids or balances',()=>{
+ const f=fixture();f.players.rows[1][1]='';f.players.rows.push([...f.players.rows[1]]);
+ assert.equal(f.run({action:'market_state'}).error,'schema_changed');
+ assert.equal(f.run({action:'market_bind',characterId:f.bank.rows[1][10]}).error,'schema_changed');assert.equal(f.flags.bankCommits,0);
+});
+test('bound numeric id survives a username change and a recycled username cannot claim',()=>{
+ const f=fixture();assert.equal(f.run({action:'market_state',user:{id:'12345',username:'new_name'}}).character.name,'Test Survivor');
+ assert.equal(f.run({action:'market_state',user:{id:'67890',username:'player'}}).availableCharacters.length,0);
+ assert.equal(f.run({action:'market_bind',user:{id:'67890',username:'player'},characterId:f.bank.rows[1][10]}).error,'character_taken');
+});
 console.log(`${tests} transaction tests passed; zero live balances used.`);
