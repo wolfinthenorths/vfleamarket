@@ -1,5 +1,8 @@
 """Fleamarket Mini App. Google is the authoritative financial ledger."""
 import json
+import gzip
+import hashlib
+from functools import lru_cache
 import mimetypes
 import os
 from pathlib import Path
@@ -23,6 +26,13 @@ BRIDGE = SheetsBridge(os.environ.get("SHEETS_BRIDGE_URL", ""), os.environ.get("S
 STOP = threading.Event()
 RECONCILE_WAKE = threading.Event()
 BRIDGE_STATUS = {"connected": False, "checkedAt": None}
+
+@lru_cache(maxsize=32)
+def static_text(path, modified_ns, size):
+    """Reuse wire bytes; the file version is part of the cache key."""
+    raw = Path(path).read_bytes()
+    compressed = gzip.compress(raw, compresslevel=5, mtime=0)
+    return tuple((body, '"' + hashlib.sha256(body).hexdigest() + '"') for body in (raw, compressed))
 
 def db():
     connection = sqlite3.connect(DATA / "market.sqlite3", timeout=15)
@@ -135,14 +145,14 @@ class Handler(BaseHTTPRequestHandler):
         # Do not retain URLs, query strings, Telegram initData or user IDs.
         return
 
-    def common_headers(self, content_type, size, no_store=True):
+    def common_headers(self, content_type, size, no_store=True, cache_control=None):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(size))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors https://web.telegram.org https://*.telegram.org")
-        self.send_header("Cache-Control", "no-store" if no_store else "public, max-age=86400")
+        self.send_header("Cache-Control", cache_control or ("no-store" if no_store else "public, max-age=86400"))
         self.end_headers()
 
     def reply(self, payload, status=200):
@@ -164,10 +174,26 @@ class Handler(BaseHTTPRequestHandler):
         if not target.is_relative_to(PUBLIC.resolve()) or not target.is_file() or target.name.startswith("."):
             self.reply({"ok": False, "error": "not_found"}, 404)
             return
-        data = target.read_bytes()
         kind = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        if kind.startswith("text/") or kind in ("application/javascript", "application/json"):
+        text_file = kind.startswith("text/") or kind in ("application/javascript", "application/json")
+        if text_file:
             kind += "; charset=utf-8"
+            stat = target.stat()
+            variants = static_text(str(target), stat.st_mtime_ns, stat.st_size)
+            accepted = self.headers.get("Accept-Encoding", "").lower().split(",")
+            use_gzip = any(value.strip() == "gzip" for value in accepted)
+            data, etag = variants[int(use_gzip)]
+            self.send_response(304 if self.headers.get("If-None-Match") == etag else 200)
+            self.send_header("Vary", "Accept-Encoding")
+            self.send_header("ETag", etag)
+            if use_gzip:
+                self.send_header("Content-Encoding", "gzip")
+            self.common_headers(kind, len(data), cache_control="no-cache")
+            if self.headers.get("If-None-Match") == etag:
+                return
+            self.wfile.write(data)
+            return
+        data = target.read_bytes()
         self.send_response(200)
         self.common_headers(kind, len(data), no_store=target.suffix in (".html", ".js", ".json", ".css"))
         self.wfile.write(data)

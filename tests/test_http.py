@@ -1,4 +1,5 @@
 import http.client
+import gzip
 import json
 from pathlib import Path
 import sys
@@ -28,10 +29,11 @@ class HTTPTests(unittest.TestCase):
         server.DATA, server.TOKEN = cls.old_data, cls.old_token
         cls.temp.cleanup()
 
-    def request(self, method, path, data=None, auth=False):
+    def request(self, method, path, data=None, auth=False, extra_headers=None):
         con = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
         headers = {"Content-Type": "application/json"}
         if auth: headers["Authorization"] = "tma " + signed()
+        headers.update(extra_headers or {})
         con.request(method, path, json.dumps(data or {}) if method == "POST" else None, headers)
         response = con.getresponse(); raw = response.read()
         result = (response.status, dict(response.getheaders()), raw)
@@ -48,6 +50,22 @@ class HTTPTests(unittest.TestCase):
         status, _, body = self.request("POST", "/api/state", {})
         self.assertEqual(status, 401)
         self.assertEqual(json.loads(body)["error"], "unauthorized")
+
+    def test_static_compression_revalidation_and_private_no_store(self):
+        status, headers, raw = self.request("GET", "/catalog.json")
+        self.assertEqual(status, 200)
+        status, compressed, body = self.request("GET", "/catalog.json", extra_headers={"Accept-Encoding":"gzip, deflate"})
+        self.assertEqual(status, 200)
+        self.assertEqual(gzip.decompress(body), raw)
+        self.assertLess(len(body), len(raw) / 2)
+        self.assertEqual(compressed["Content-Encoding"], "gzip")
+        self.assertNotEqual(headers["ETag"], compressed["ETag"])
+        status, _, body = self.request("GET", "/catalog.json", extra_headers={"Accept-Encoding":"gzip", "If-None-Match":compressed["ETag"]})
+        self.assertEqual(status, 304)
+        self.assertEqual(body, b"")
+        self.assertEqual(compressed["Cache-Control"], "no-cache")
+        _, private, _ = self.request("POST", "/api/state")
+        self.assertEqual(private["Cache-Control"], "no-store")
 
     def test_backpack_routes_require_signature_and_ignore_spoofed_owner(self):
         for route in ("inventory", "branch_join", "pack_save"):

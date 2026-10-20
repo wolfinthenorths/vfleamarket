@@ -40,3 +40,9 @@ dialog{background:var(--card);border-color:#8e9275;border-radius:0;box-shadow:0 
 .backpack-notice[role=alert]{border-color:var(--rust)}
 @keyframes pack-refresh-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.pack-refresh[aria-busy=true] svg{animation:none}}
+.brand-cap{width:44px;height:44px;object-fit:contain;background:transparent;clip-path:none;filter:drop-shadow(0 2px 3px #0006)}
+.wallet-status{display:inline-flex;align-items:center;justify-content:flex-end;gap:7px}
+.wallet-icon{width:19px;height:19px;flex-shrink:0;stroke:currentColor;stroke-width:1.5;fill:none}
+.wallet-spinner{animation:pack-refresh-spin 1.2s linear infinite}
+@media(max-width:520px){.wallet-status{font-size:17px}.wordmark{gap:9px}.brand-cap{width:40px;height:40px}}
+@media(prefers-reduced-motion:reduce){.wallet-spinner{animation-duration:2.8s}}

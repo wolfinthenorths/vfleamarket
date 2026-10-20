@@ -17,6 +17,8 @@
   const caps = value => new Intl.NumberFormat('ru-RU').format(value);
   const counted = (n,one,few,many) => `${n} ${n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many}`;
   const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 2 12h14l2-12H3Zm4 0 5-6 5 6M8 12v4m4-4v4m4-4v4"/></svg>';
+  const arrowIcon='<svg class="wallet-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg>';
+  const loadingIcon='<svg class="wallet-icon wallet-spinner" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.3 5.7"/></svg>';
   // Touch and programmatic dialog focus should not draw browser focus frames.
   document.addEventListener('keydown',e=>{if(e.key==='Tab')document.documentElement.dataset.input='keyboard';});
   document.addEventListener('pointerdown',()=>{delete document.documentElement.dataset.input;},true);
@@ -34,7 +36,12 @@
   const quantityControl = (id,quantity,context='') => `<div class="quantity" aria-label="Количество"><button data-change="${id}" data-delta="-1" data-context="${context}" aria-label="Убрать одну штуку">−</button><span>${quantity}</span><button data-change="${id}" data-delta="1" data-context="${context}" aria-label="Добавить одну штуку" ${quantity>=99?'disabled':''}>+</button></div>`;
   function picture(s) { return s.banner ? `<div class="shop-art"><img src="${s.banner}" data-poster="${s.poster || ''}" alt="${esc(s.name)}" loading="lazy"></div>` : `<div class="shop-art nuka-art" aria-label="Автомат Нюка-Колы">${[s.items[0],s.items[1],s.items[7]].map(i=>`<img src="${i.image}" alt="" loading="lazy">`).join('')}</div>`; }
   function applyMotion() { if (matchMedia('(prefers-reduced-motion: reduce)').matches) document.querySelectorAll('img[data-poster]').forEach(img => { if(img.dataset.poster) img.src = img.dataset.poster; }); }
-  function wallet() { $('#player-label').textContent = state?.character?.name || (authenticated ? 'Ваш персонаж' : 'Личный счет'); $('#balance-label').innerHTML = state?.character ? `${caps(state.balance)} <span class="unit">крышек</span>` : authenticated ? 'Выбрать ↗' : 'Войти ↗'; }
+  function wallet() {
+    const loading=Boolean(stateLoading);
+    $('#player-label').textContent=state?.character?.name||(authenticated?rememberedName||'Ваш персонаж':'Личный счет');
+    $('#balance-label').innerHTML=loading?`<span class="wallet-status">Загружается…${loadingIcon}</span>`:state?.character?`${caps(state.balance)} <span class="unit">крышек</span>`:`<span class="wallet-status">${authenticated?'Выбрать':'Войти'}${arrowIcon}</span>`;
+    $('#wallet').setAttribute('aria-busy',String(loading));
+  }
   function showNote(message='') { $('#service-note').textContent=message; $('#service-note').hidden=!message; }
   async function api(path,body={}) {
     const abort = new AbortController(), timer=setTimeout(()=>abort.abort(),62000);
@@ -49,10 +56,11 @@
   async function loadState() {
     if(!authenticated) return null;
     if(stateLoading)return stateLoading;
-    stateLoading=api('state').then(result=>{state=result;rememberIdentity();wallet();showNote('');return result;}).finally(()=>{stateLoading=null;});
+    stateLoading=api('state').then(result=>{state=result;rememberIdentity();showNote('');return result;}).finally(()=>{stateLoading=null;wallet();});
+    wallet();
     return stateLoading;
   }
-  function rememberIdentity(){try{if(state?.character)localStorage.setItem(identityKey,JSON.stringify({name:state.character.name}));else localStorage.removeItem(identityKey);}catch{}}
+  function rememberIdentity(){rememberedName=state?.character?.name||'';try{if(rememberedName)localStorage.setItem(identityKey,JSON.stringify({name:rememberedName}));else localStorage.removeItem(identityKey);}catch{}}
   function routeValue() { const h=location.hash.slice(1); return h.startsWith('tgWebApp')?'':h; }
   function go(hash) { if(routeValue()===hash) render(); else location.hash=hash; }
   function render() {
