@@ -1,0 +1,16 @@
+const assert = require('node:assert/strict');
+const {collect} = require('../public/inventory.js');
+const first = {id:'receipt-a',character:{id:'current'},shopId:'nuka',shopName:'Автомат Нюка-Колы',lines:[{id:'nuka-01',name:'Нюка-Кола',quantity:2,slots:1}]};
+const second = {id:'receipt-b',character:{id:'current'},shopId:'nuka',shopName:'Автомат Нюка-Колы',lines:[{id:'nuka-01',name:'Нюка-Кола',quantity:3,slots:1},{id:'nuka-02',name:'Квантовая',quantity:1,slots:1}]};
+const previous = {...first,id:'receipt-c',character:{id:'previous'},lines:[{id:'nuka-01',quantity:99}]};
+const input = [second,first,previous,first];
+const snapshot = JSON.stringify(input);
+const items=collect(input,'current');
+assert.equal(items.length,2);
+assert.equal(items.find(i=>i.id==='nuka-01').quantity,5,'Repeated purchases combine; duplicate receipts do not double the count.');
+assert.equal(items.find(i=>i.id==='nuka-02').quantity,1);
+assert.equal(JSON.stringify(input),snapshot,'Financial receipts remain unchanged.');
+assert.deepEqual(collect(input,null),[],'No character does not expose another character inventory.');
+assert.equal(collect(input,'previous')[0].quantity,99,'A former character stays separate.');
+assert.deepEqual(collect([{...first,lines:[{id:'nuka-01',quantity:-1},{id:'nuka-02',quantity:1.5}]}],'current'),[]);
+console.log('5 inventory checks passed: quantities, receipt deduplication, character isolation, unchanged receipts, invalid quantities.');

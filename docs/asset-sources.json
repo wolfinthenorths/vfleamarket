@@ -1,0 +1,20 @@
+{
+  "background": {
+    "game": "Fallout 3",
+    "location": "Rivet City Market",
+    "url": "https://images.fallout.wiki/e/e9/Rivet_City_Market.jpg",
+    "sha256": "8ccc343533dad660afda4d6df3ac01388e4de030df2db0e705ae39131cb84bc9",
+    "deployedPath": "/assets/scenery/rivet-city-market.webp",
+    "deployedSha256": "8e1b13995fba8d6c92e19ae1de4db46dc73c8bcc6cfaf89173e5df91159b82ab"
+  },
+  "nuka": {
+    "driveId": "13gr9vmwGNsIaTpkrkvzWKzSMxhPf7Ubz",
+    "mime": "image/gif",
+    "path": "/assets/banners/nuka.gif",
+    "sha256": "c93a1834f505061b0fef41f159ffcc05d63d239e7f04d5f5b8fbca43c4baf484",
+    "frames": 10,
+    "width": 700,
+    "height": 350,
+    "durationMs": 1400
+  }
+}

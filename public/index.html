@@ -3,12 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#eee5d2">
+  <meta name="theme-color" content="#1b241d">
   <meta name="description" content="Блошиный рынок Dawn of the Dead: шесть магазинов, игровые предметы и покупки за крышки.">
   <title>Блошиный рынок · Dawn of the Dead</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%23944432' d='m32 2 5 6 8-2 3 8 8 3-2 8 6 7-6 7 2 8-8 3-3 8-8-2-5 6-7-6-8 2-3-8-8-3 2-8-6-7 6-7-2-8 8-3 3-8 8 2z'/%3E%3Ctext x='32' y='42' text-anchor='middle' fill='%23f3ead7' font-size='32' font-family='serif'%3EК%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/bunker.css">
   <script src="/telegram-web-app.js"></script>
+  <script src="/inventory.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -24,7 +26,7 @@
   <nav class="bottom-nav" aria-label="Основная навигация">
     <a href="#" data-nav="market"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10h18M4 10v10h16V10M2 10l3-6h14l3 6M9 20v-6h6v6M8 4l-1 6m9-6 1 6"/></svg><span>Рынок</span></a>
     <a href="#carts" data-nav="carts"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 2 12h14l2-12H3Zm4 0 5-6 5 6M8 12v4m4-4v4m4-4v4"/></svg><span>Корзины</span><b id="cart-count" hidden>0</b></a>
-    <a href="#history" data-nav="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v19l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6m-6 4h3"/></svg><span>Покупки</span></a>
+    <a href="#inventory" data-nav="inventory"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6V4h8v2M7 6h10l3 5v10H4V11l3-5ZM4 12h16M9 15h6v4H9v-4Z"/></svg><span>Инвентарь</span></a>
   </nav>
   <dialog id="sheet" aria-labelledby="sheet-title"><div id="sheet-content"></div></dialog>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
