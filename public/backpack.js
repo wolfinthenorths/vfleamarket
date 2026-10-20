@@ -1,6 +1,43 @@
 /* Inventory ownership and per-branch backpack editor. All writes are server checked. */
 (() => {
   let dispose = () => {};
+  // A single request survives navigation. Only display snapshots are cached;
+  // branch joins and saves always go through the server's live checks.
+  const snapshots=new Map(), requests=new Map(), generations=new Map();
+  const clone=value=>JSON.parse(JSON.stringify(value));
+  const cacheKey=(scope,branchId)=>JSON.stringify([String(scope),branchId||'']);
+  const generation=scope=>generations.get(String(scope))||0;
+  function invalidate(scope){
+    scope=String(scope);generations.set(scope,generation(scope)+1);
+    for(const map of [snapshots,requests])for(const key of map.keys())if(JSON.parse(key)[0]===scope)map.delete(key);
+  }
+  function remember(scope,branchId,result){
+    const entry={value:clone(result),at:Date.now()};
+    snapshots.set(cacheKey(scope,branchId),entry);
+    if(result.pack)snapshots.set(cacheKey(scope,result.pack.branchId),entry);
+  }
+  function snapshot(scope,branchId){
+    const entry=snapshots.get(cacheKey(scope,branchId));
+    return entry&&Date.now()-entry.at<300000?clone(entry.value):null;
+  }
+  function requestInventory(api,scope,branchId){
+    const key=cacheKey(scope,branchId);
+    if(requests.has(key))return requests.get(key);
+    const epoch=generation(scope);
+    const request=Promise.resolve().then(()=>api('inventory',{branchId})).then(result=>{
+      if(epoch!==generation(scope))return null;
+      remember(scope,branchId,result);return result;
+    }).catch(error=>{if(['not_bound','unauthorized'].includes(error.code))invalidate(scope);throw error;}).finally(()=>{
+      if(requests.get(key)===request)requests.delete(key);
+    });
+    requests.set(key,request);return request;
+  }
+  function preload({api,scope}){
+    let branchId='';try{branchId=localStorage.getItem('flea:branch:v1:'+scope)||'';}catch{}
+    const entry=snapshots.get(cacheKey(scope,branchId));
+    if(entry&&Date.now()-entry.at<30000)return Promise.resolve();
+    return requestInventory(api,scope,branchId).catch(()=>{});
+  }
   const sorted = items => [...items].sort((a,b)=>a.id.localeCompare(b.id)).map(i=>({id:i.id,quantity:i.quantity}));
   function render(options) {
     dispose();
@@ -41,14 +78,14 @@
       root.querySelector('[data-pack-open]').remove();
       root.querySelector('.pack-summary [data-pack-refresh]')?.remove();
       root.querySelector('.pack-summary > div')?.classList.add('pack-summary-heading');
-      root.querySelector('.backpack-controls').insertAdjacentHTML('beforeend',`<div class="backpack-actions"><button type="button" class="backpack-open" data-pack-open aria-label="Открыть рюкзак"><img src="/assets/ui/backpack.png" alt="" width="62" height="68"><span>${busy?'Подключаем…':'Рюкзак'}</span></button><button type="button" class="secondary pack-refresh" data-pack-refresh aria-busy="${loading}" ${busy||loading?'disabled':''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5.3 7a8 8 0 0 1 13.4-1L20 12M4 12l1.3 6A8 8 0 0 0 18.7 17"/></svg><span>Обновить</span></button></div>`);
+      root.querySelector('.backpack-controls').insertAdjacentHTML('beforeend',`<div class="backpack-actions"><button type="button" class="backpack-open" data-pack-open aria-label="Открыть рюкзак"><img src="/assets/ui/backpack.png" alt="" width="62" height="68"><span>${busy?'Подключаем…':'Рюкзак'}</span></button><button type="button" class="secondary pack-refresh" data-pack-refresh aria-busy="${loading}" ${busy||loading?'disabled':''}><svg class="${loading?'wallet-spinner':''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M5.3 7a8 8 0 0 1 13.4-1L20 12M4 12l1.3 6A8 8 0 0 0 18.7 17"/></svg><span>${loading?'Обновляем…':'Обновить'}</span></button></div>`);
       for(const select of root.querySelectorAll('select'))select.disabled=busy||Boolean(pending)||Boolean(dirty());
       root.querySelector('[data-pack-open]').disabled=!branchId||busy||Boolean(pending)||Boolean(dirty());
       if(dirty())root.insertAdjacentHTML('beforeend','<button class="text-button" data-pack-reset>Отменить изменения рюкзака</button>');
     }
     async function refresh(reset=false){
       if(loading||busy||!alive())return;loading=true;paint();
-      try{adopt(await api('inventory',{branchId}),reset);}catch(e){if(alive()){message=e.message;if(data)paint();else root.innerHTML=`<section class="empty"><p>${esc(message)}</p><button class="secondary" data-pack-refresh>Попробовать снова</button></section>`;}}
+      try{const result=await requestInventory(api,scope,branchId);if(result)adopt(clone(result),reset);}catch(e){if(alive()){message=e.message;if(data)paint();else root.innerHTML=`<section class="empty"><p>${esc(message)}</p><button class="secondary" data-pack-refresh>Попробовать снова</button></section>`;}}
       finally{loading=false;paint();}
     }
     async function openBranch(){
@@ -57,8 +94,8 @@
       if(selected&&!selected.hasSheet&&data.branches.some(b=>b.chapter===selected.chapter&&b.hasSheet)){
         message=wrongBranch;notify(message);window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred('error');paint();return;
       }
-      busy=true;message='';paint();
-      try{const result=await api('branch_join',{branchId});adopt(result,true);message=result.waiting?'Дождитесь своего листа или напомните о нем!':'Рюкзак открыт.';}
+      invalidate(scope);busy=true;message='';paint();
+      try{const result=await api('branch_join',{branchId});remember(scope,branchId,result);adopt(result,true);message=result.waiting?'Дождитесь своего листа или напомните о нем!':'Рюкзак открыт.';}
       catch(e){message=e.message;if(e.code==='incorrect_branch')notify(message);}finally{busy=false;paint();}
     }
     async function save(){
@@ -68,8 +105,8 @@
         pending={branchId:data.pack.branchId,version:data.pack.version,items:asLines(),requestId:crypto.randomUUID()};
         try{localStorage.setItem(pendingKey,JSON.stringify(pending));}catch{pending=null;message='Не удалось сохранить запрос. Закройте приложение и откройте его снова.';paint();return;}
       }
-      busy=true;message='';paint();
-      try{const result=await api('pack_save',pending);pending=null;try{localStorage.removeItem(pendingKey);}catch{}adopt(result,true);message='Рюкзак сохранен в таблице.';}
+      invalidate(scope);busy=true;message='';paint();
+      try{const result=await api('pack_save',pending);pending=null;try{localStorage.removeItem(pendingKey);}catch{}remember(scope,branchId,result);adopt(result,true);message='Рюкзак сохранен в таблице.';}
       catch(e){
         message=e.message;
         if(['invalid_pack','item_not_owned','pack_full','pack_changed','manual_slots_unknown','invalid_capacity','character_sheet_missing','branch_sheet_missing','invalid_branch','incorrect_branch'].includes(e.code)){pending=null;try{localStorage.removeItem(pendingKey);}catch{}busy=false;await refresh();}
@@ -90,10 +127,12 @@
         try{const result=await api('history');receipts=result.orders.map(o=>`<article class="history-card"><div class="history-head"><h3>${esc(o.shopName)}</h3><span>${esc(o.when)}</span></div><ul class="history-list">${o.lines.map(i=>`<li><span>${esc(i.name)} × ${i.quantity}</span><span>${i.total} кр.</span></li>`).join('')}</ul><p>Всего: ${o.total} кр.</p></article>`).join('')||'<p>Покупок пока нет.</p>';if(alive())root.querySelector('#pack-receipts').innerHTML=receipts;}catch(e){if(alive())root.querySelector('#pack-receipts').textContent=e.message;}
       }
     });
-    const focus=()=>{if(document.visibilityState!=='hidden')refresh();};
+    const focus=()=>{const entry=snapshots.get(cacheKey(scope,branchId));if(document.visibilityState!=='hidden'&&(!entry||Date.now()-entry.at>=30000))refresh();};
     const timer=setInterval(focus,30000);window.addEventListener('focus',focus);document.addEventListener('visibilitychange',focus);
     dispose=()=>{stopped=true;clearInterval(timer);window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);};
-    refresh().then(()=>{if(pending&&data?.pack)save();});
+    const cached=snapshot(scope,branchId);if(cached&&!pending)adopt(cached,true);
+    const entry=snapshots.get(cacheKey(scope,branchId));
+    if(pending||!cached||!entry||Date.now()-entry.at>=30000)refresh().then(()=>{if(alive()&&pending&&data?.pack)save();});
   }
-  window.BackpackView={render,stop:()=>dispose()};
+  window.BackpackView={render,preload,invalidate,stop:()=>dispose()};
 })();

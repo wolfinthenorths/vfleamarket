@@ -56,7 +56,7 @@
   async function loadState() {
     if(!authenticated) return null;
     if(stateLoading)return stateLoading;
-    stateLoading=api('state').then(result=>{state=result;rememberIdentity();showNote('');return result;}).finally(()=>{stateLoading=null;wallet();});
+    stateLoading=api('state').then(result=>{if(state&&state.character?.id!==result.character?.id)window.BackpackView?.invalidate(scope);state=result;rememberIdentity();if(state.character)window.BackpackView?.preload({api,scope});showNote('');return result;}).finally(()=>{stateLoading=null;wallet();});
     wallet();
     return stateLoading;
   }
@@ -123,7 +123,7 @@
   function toggleCharacters(open){const list=$('#character-options');if(!list)return;list.hidden=!open;$('#character-trigger').setAttribute('aria-expanded',String(open));}
   function selectCharacter(id){const option=[...document.querySelectorAll('[data-character]')].find(b=>b.dataset.character===id);if(!option)return;$('#character').value=id;$('#character-selected').textContent=option.textContent;document.querySelectorAll('[data-character]').forEach(b=>b.setAttribute('aria-selected',String(b===option)));toggleCharacters(false);$('#character-trigger').focus();}
   dialog.addEventListener('keydown',e=>{const list=$('#character-options'),trigger=$('#character-trigger');if(!list||!trigger)return;const options=[...list.querySelectorAll('[data-character]')];if(e.key==='Escape'&&!list.hidden){e.preventDefault();e.stopPropagation();toggleCharacters(false);trigger.focus();return;}if(!['ArrowDown','ArrowUp','Home','End'].includes(e.key)||!(e.target===trigger||list.contains(e.target)))return;e.preventDefault();toggleCharacters(true);const index=options.indexOf(document.activeElement);const target=e.key==='Home'?0:e.key==='End'?options.length-1:index<0?(e.key==='ArrowUp'?options.length-1:0):(index+(e.key==='ArrowDown'?1:-1)+options.length)%options.length;options[target]?.focus();});
-  async function bind(){const id=$('#character')?.value;if(!id || !$('#own-character')?.checked){$('#bind-error').textContent='Выберите имя и подтвердите, что это ваш персонаж.';return;}const b=$('#bind-button');b.disabled=true;b.textContent='Запоминаем…';try{state=await api('bind',{characterId:id});wallet();dialog.close();render();toast('Счет персонажа подключен.');}catch(e){$('#bind-error').textContent=e.message;b.disabled=false;b.textContent='К торговым рядам →';}}
+  async function bind(){const id=$('#character')?.value;if(!id || !$('#own-character')?.checked){$('#bind-error').textContent='Выберите имя и подтвердите, что это ваш персонаж.';return;}const b=$('#bind-button');b.disabled=true;b.textContent='Запоминаем…';try{state=await api('bind',{characterId:id});window.BackpackView?.invalidate(scope);window.BackpackView?.preload({api,scope});rememberIdentity();wallet();dialog.close();render();toast('Счет персонажа подключен.');}catch(e){$('#bind-error').textContent=e.message;b.disabled=false;b.textContent='К торговым рядам →';}}
   async function checkout(id){
     if(!authenticated){location.href='https://t.me/vfleamarketbot';return;}if(busy||pending)return;
     busy=true;renderCarts();
@@ -140,6 +140,7 @@
   async function submitPending(){
     if(busy||!pending)return;busy=true;render();
     try{const r=await api('checkout',pending),o=r.order;
+      window.BackpackView?.invalidate(scope);window.BackpackView?.preload({api,scope});
       const old=carts[pending.shopId]||{};for(const i of pending.items){old[i.id]=Math.max(0,(old[i.id]||0)-i.quantity);if(!old[i.id])delete old[i.id];}if(!Object.keys(old).length)delete carts[pending.shopId];
       pending=null;try{localStorage.removeItem(pendingKey);}catch{}saveCart();state={...(state||{}),character:o.character,balance:o.balanceAfter};wallet();showNote('');
       openSheet(`<div class="success-sheet"><div class="receipt-seal" aria-hidden="true">✓</div><span class="eyebrow">${esc(o.shopName)}</span><h2 id="sheet-title">Сделка состоялась.</h2><p>Предметы куплены, крышки списаны.<br>Предметы появились в инвентаре.</p><div class="confirm-total"><span>Списано</span><span class="price">${caps(o.total)} <small>кр.</small></span></div><p>Остаток: <strong>${caps(o.balanceAfter)} крышек</strong></p><p class="receipt-number">Заказ ${esc(o.id.slice(0,8))} · ${esc(o.when)}</p><button class="primary wide" data-receipts>Открыть инвентарь</button><button class="text-button wide" data-close>Продолжить покупки</button></div>`);try{tg?.HapticFeedback?.notificationOccurred('success');}catch{}
