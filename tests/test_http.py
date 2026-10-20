@@ -49,6 +49,30 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertEqual(json.loads(body)["error"], "unauthorized")
 
+    def test_backpack_routes_require_signature_and_ignore_spoofed_owner(self):
+        for route in ("inventory", "branch_join", "pack_save"):
+            status, _, _ = self.request("POST", "/api/" + route, {})
+            self.assertEqual(status, 401)
+        with patch.object(server.BRIDGE, "call", return_value={"ok": True, "items": []}) as call:
+            status, _, _ = self.request("POST", "/api/inventory", {"branchId": "2.4", "user": {"id": "999"}, "characterId": "forged"}, auth=True)
+        self.assertEqual(status, 200)
+        args, kwargs = call.call_args
+        self.assertEqual(args[0], "inventory")
+        self.assertEqual(args[1]["id"], "12345")
+        self.assertEqual(kwargs, {"branchId": "2.4"})
+
+    def test_pack_save_is_bounded_and_sent_to_signed_bridge(self):
+        payload = {"branchId": "2.4", "version": "test-version", "requestId": "11111111-1111-4111-8111-111111111111", "items": [{"id": "count-01", "quantity": 1}]}
+        with patch.object(server.BRIDGE, "call", return_value={"ok": True}) as call:
+            status, _, _ = self.request("POST", "/api/pack_save", payload, auth=True)
+        self.assertEqual(status, 200)
+        self.assertEqual(call.call_args.args[0], "pack_save")
+        self.assertEqual(call.call_args.kwargs["items"], payload["items"])
+        payload["items"] = [{}] * 137
+        status, _, body = self.request("POST", "/api/pack_save", payload, auth=True)
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(body)["error"], "invalid_pack")
+
     def test_paid_receipt_resolves_before_current_catalog(self):
         order={"id":"11111111-1111-4111-8111-111111111111","shopId":"count","revision":"older-catalog","total":230,"userId":"12345","lines":[{"id":"count-01","quantity":1}]}
         body={"orderId":order["id"],"shopId":"count","revision":"older-catalog","expectedTotal":230,"items":[{"id":"count-01","quantity":1}]}

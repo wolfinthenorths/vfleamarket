@@ -33,6 +33,19 @@ ERRORS = {
     "id_conflict": "Номер покупки уже используется. Обратитесь к мастеру.",
     "invalid_request": "Не удалось обработать запрос.",
     "order_not_found": "Покупка еще не зарегистрирована.",
+    "invalid_branch": "Выберите ветку!",
+    "invalid_pack": "Проверьте количество предметов в рюкзаке.",
+    "pack_full": "Все выбранные предметы не помещаются. Вместимость могла измениться — обновите рюкзак.",
+    "pack_changed": "Рюкзак или вместимость изменились. Обновите данные перед сохранением.",
+    "item_not_owned": "В инвентаре нет нужного количества этого предмета.",
+    "invalid_capacity": "Не удалось прочитать количество слотов. Попросите мастера проверить формулу вместимости.",
+    "inventory_formula": "В ячейке предметов обнаружена формула. Попросите мастера проверить инвентарь.",
+    "inventory_too_large": "Список вещей слишком большой для ячейки. Обратитесь к мастеру.",
+    "character_sheet_missing": "Дождитесь своего листа или напомните о нем!",
+    "branch_sheet_missing": "Выберите ветку!",
+    "template_not_found": "Для этого класса пока нет шаблона рюкзака. Обратитесь к мастеру.",
+    "invalid_character_stats": "В общей сводке не заполнены характеристики персонажа.",
+    "manual_slots_unknown": "В рюкзаке есть записанные вручную вещи с неизвестным числом слотов. Попросите мастера уточнить их.",
 }
 
 class MarketError(RuntimeError):
@@ -120,7 +133,7 @@ class SheetsBridge:
     def call(self, action, user=None, **fields):
         if not self.configured:
             raise MarketError("not_configured", 503)
-        if action not in ("state", "bind", "checkout", "order", "history", "verify", "reconcile"):
+        if action not in ("state", "bind", "checkout", "order", "history", "verify", "reconcile", "inventory", "branch_join", "pack_save"):
             raise MarketError("invalid_request")
         payload = json.dumps({"action": "market_" + action, **({"user": user} if user else {}), **fields}, ensure_ascii=True, separators=(",", ":"))
         timestamp = int(time.time() * 1000)

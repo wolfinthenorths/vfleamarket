@@ -164,7 +164,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             path = urllib.parse.urlsplit(self.path).path
-            if path not in ("/api/state", "/api/bind", "/api/checkout", "/api/order", "/api/history"):
+            if path not in ("/api/state", "/api/bind", "/api/checkout", "/api/order", "/api/history", "/api/inventory", "/api/branch_join", "/api/pack_save"):
                 self.reply({"ok": False, "error": "not_found"}, 404)
                 return
             if self.headers.get("Origin") and APP_URL and self.headers.get("Origin") != APP_URL:
@@ -185,6 +185,18 @@ class Handler(BaseHTTPRequestHandler):
             action = path.rsplit("/", 1)[-1]
             if action in ("state", "history"):
                 result = BRIDGE.call(action, user)
+            elif action in ("inventory", "branch_join", "pack_save"):
+                branch_id = body.get("branchId", "")
+                if not isinstance(branch_id, str) or len(branch_id) > 32:
+                    raise MarketError("invalid_branch")
+                if action == "pack_save":
+                    items = body.get("items")
+                    if not isinstance(items, list) or len(items) > 136:
+                        raise MarketError("invalid_pack")
+                    result = BRIDGE.call(action, user, branchId=branch_id, items=items,
+                                        version=body.get("version"), requestId=validate_order_id(body.get("requestId")))
+                else:
+                    result = BRIDGE.call(action, user, branchId=branch_id)
             elif action == "bind":
                 character_id = body.get("characterId")
                 if not isinstance(character_id, str) or len(character_id) != 36:

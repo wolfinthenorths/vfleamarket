@@ -48,6 +48,7 @@
   function go(hash) { if(routeValue()===hash) render(); else location.hash=hash; }
   function render() {
     if(!catalog) return;
+    window.BackpackView?.stop();
     const route=routeValue();
     document.querySelectorAll('[data-nav]').forEach(a=>{ const current=a.dataset.nav==='market' ? !route || route.startsWith('shop/') : route.startsWith(a.dataset.nav) || a.dataset.nav==='inventory' && route==='history'; a.toggleAttribute('aria-current',current); if(current)a.setAttribute('aria-current','page'); });
     try { if(route) tg?.BackButton.show(); else tg?.BackButton.hide(); } catch {}
@@ -84,21 +85,9 @@
     main.innerHTML=`<h1 class="page-title">Ваши корзины</h1><p class="page-lead">Каждый магазин оформляет свою покупку отдельно.</p>${pendingHtml()}${groups.length?groups.map(s=>{const lines=linesFor(s.id),total=totalFor(s.id);return `<section class="cart-group"><div class="cart-group-head"><h2>${esc(s.name)}</h2><a href="#shop/${s.id}">В магазин ↗</a></div>${lines.map(i=>`<div class="cart-row"><img src="${i.image}" alt=""><div><h3>${esc(i.name)}</h3><p>${caps(i.price)} кр. за шт. · ${i.slots} сл.</p></div><div><div class="row-total">${caps(i.total)} <small>кр.</small></div>${quantityControl(i.id,i.quantity,'cart')}</div></div>`).join('')}<div class="cart-foot"><div><small>${counted(countFor(s.id),'предмет','предмета','предметов')} · ${counted(lines.reduce((n,i)=>n+i.slots*i.quantity,0),'слот','слота','слотов')}</small><span class="price">${caps(total)} <small>крышек</small></span></div><button class="primary" data-checkout="${s.id}" ${busy||pending?'disabled':''}>${authenticated ? state?.character ? 'К покупке →' : 'Выбрать персонажа' : 'Открыть в Telegram ↗'}</button>${state?.character?`<div class="balance-check ${state.balance<total?'insufficient':''}"><span>На счете: ${caps(state.balance)} кр.</span><span>${state.balance<total?`Не хватает ${caps(total-state.balance)} кр.`:`После покупки: ${caps(state.balance-total)} кр.`}</span></div>`:''}</div></section>`;}).join(''):`<section class="empty">${icon}<h2>Пока пусто</h2><p>Загляните в торговые ряды и добавьте понравившиеся предметы.</p><a class="primary" href="#">К магазинам →</a></section>`}`;
     if(only)main.insertAdjacentHTML('beforeend','<a class="text-button" href="#carts">Все корзины</a>');
   }
-  async function renderInventory() {
-    activeShop='';main.innerHTML=`<h1 class="page-title">Инвентарь</h1><p class="page-lead">Последние приобретения персонажа.</p>${pendingHtml()}<div id="inventory-content"><div class="loading-card">Собираем покупки…</div></div>`;
-    const container=$('#inventory-content');
-    if(!authenticated){container.innerHTML='<section class="empty"><h2>Что удалось раздобыть?</h2><p>Откройте магазин через бота, чтобы увидеть предметы своего персонажа.</p><a class="primary" href="https://t.me/vfleamarketbot">К торговым рядам ↗</a></section>';return;}
-    try{
-      await loadState();
-      if($('#inventory-content')!==container)return;
-      if(!state.character){container.innerHTML='<section class="empty"><h2>Назови свое имя</h2><p>Выберите персонажа, чтобы увидеть его приобретения.</p><button class="primary" data-profile>Выбрать персонажа</button></section>';return;}
-      const result=await api('history');
-      if($('#inventory-content')!==container)return;
-      const orders=result.orders.filter(o=>o.character?.id===state.character.id);
-      const items=MarketInventory.collect(orders,state.character.id);
-      const receipts=orders.map(o=>`<article class="history-card"><div class="history-head"><div><span class="eyebrow">${esc(o.when)}</span><h3>${esc(o.shopName)}</h3><span class="status-paid">ОПЛАЧЕНО · ${esc(o.character.name)}</span></div><span class="price">−${caps(o.total)} <small>кр.</small></span></div><ul class="history-list">${o.lines.map(i=>`<li><span>${esc(i.name)} × ${i.quantity}</span><span>${caps(i.total)} кр.</span></li>`).join('')}</ul><div class="history-bottom"><span>Заказ ${esc(o.id.slice(0,8))}</span><span>Остаток ${caps(o.balanceAfter)} кр.</span></div></article>`).join('');
-      container.innerHTML=items.length?`${result.orders.length>=25?'<p class="page-lead">Показаны предметы из последних 25 покупок.</p>':''}<section class="inventory-grid" aria-label="Приобретенные предметы">${items.map(i=>`<article class="inventory-item">${byId[i.id]?.image?`<img src="${esc(byId[i.id].image)}" alt="${esc(i.name)}" loading="lazy">`:''}<h2>${esc(i.name)}</h2><p>${esc(i.shopName)}</p><strong>${counted(i.quantity,'предмет','предмета','предметов')}</strong></article>`).join('')}</section><details class="inventory-receipts"><summary>Квитанции</summary>${receipts}</details>`:'<section class="empty"><h2>Пока пусто</h2><p>Купленные в торговых рядах предметы появятся здесь.</p><a class="primary" href="#">К магазинам →</a></section>';
-    }catch(e){if($('#inventory-content')===container)container.innerHTML=`<section class="empty"><p>${esc(e.message)}</p><button class="secondary" data-refresh-history>Обновить</button></section>`;}
+  function renderInventory() {
+    activeShop='';
+    window.BackpackView.render({main,api,esc,counted,scope,authenticated,catalog});
   }
   function openSheet(html,entry=false) { dialog.classList.toggle('entry-screen',entry);sheet.innerHTML=`<div class="sheet-body"><button class="close-sheet" data-close aria-label="Закрыть">×</button>${html}</div>`;if(!dialog.open)dialog.showModal();applyMotion(); }
   function detail(id){const i=byId[id];if(!i)return;openSheet(`<div class="detail-image"><img src="${i.image}" alt="${esc(i.name)}"></div><span class="eyebrow">${esc(i.category)} / ${esc(shopOf(i.shopId).name)}</span><h2 id="sheet-title">${esc(i.name)}</h2><p class="detail-description">${esc(i.description)}</p>${i.effects.map(l=>{const n=l.indexOf(':');return `<p class="effect-line">${n>=0?`<strong>${esc(l.slice(0,n+1))}</strong>${esc(l.slice(n+1))}`:esc(l)}</p>`;}).join('')}<div class="detail-footer"><div><span class="price">${caps(i.price)} <small>крышек</small></span><small>Слотов: ${i.slots}</small></div>${carts[i.shopId]?.[id]?quantityControl(id,carts[i.shopId][id],'detail'):'<span class="eyebrow">В наличии</span>'}</div><button class="primary wide" data-add-detail="${id}">Добавить в корзину</button>`);}
