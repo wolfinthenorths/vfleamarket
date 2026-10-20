@@ -24,9 +24,38 @@ function fmHeader_(book,name,headers) {
   return sheet;
 }
 function fmRows_(sheet,width) {
+  if(sheet.fmValues)return sheet.fmValues.slice(1).map(r=>Array.from({length:width},(_,i)=>r[i]===undefined?'':r[i]));
   const n=sheet.getLastRow();
   if(n>10001) fmError_('schema_changed');
   return n>1 ? sheet.getRange(2,1,n-1,width).getValues() : [];
+}
+/** Two bounded API snapshots for interactive reads/payments, including headers. */
+function fmFastContext_() {
+  function read(id,ranges){
+    const result=Sheets.Spreadsheets.get(id,{ranges:ranges,fields:'sheets(properties(sheetId,title),data(rowData(values(effectiveValue,userEnteredValue,note))))'});
+    const sheets={};
+    (result.sheets||[]).forEach(s=>{
+      const cells=s.data&&s.data[0]&&s.data[0].rowData||[];
+      const values=cells.map(r=>(r.values||[]).map(c=>{const v=c.effectiveValue||{};return v.numberValue!==undefined?v.numberValue:v.boolValue!==undefined?v.boolValue:v.stringValue!==undefined?v.stringValue:v.errorValue?'#ERROR!':'';}));
+      sheets[s.properties.title]={fmValues:values,getSheetId:()=>s.properties.sheetId,getRange:(row,col)=>({getFormula:()=>cells[row-1]?.values?.[col-1]?.userEnteredValue?.formulaValue||'',getNote:()=>cells[row-1]?.values?.[col-1]?.note||''})};
+    });
+    return sheets;
+  }
+  function header(sheets,name,expected,maxRows){
+    const s=sheets[name];if(!s||s.fmValues.length>maxRows||expected.some((h,i)=>s.fmValues[0]?.[i]!==h))fmError_('schema_changed');return s;
+  }
+  const bankSheets=read(FM_BANK_ID,["'Крышки'!A:K","'_Покупки_бот'!A:G"]);
+  const sheet=bankSheets['Крышки'];
+  if(!sheet||sheet.fmValues.length>1000||sheet.fmValues[0]?.[8]!=='Покупки на Блошином рынке'||sheet.fmValues[0]?.[9]!=='Итого'||sheet.fmValues[0]?.[10]!=='ID персонажа')fmError_('schema_changed');
+  const seen={},characters=[];
+  sheet.fmValues.slice(1).forEach((r,i)=>{
+    if(!String(r[0]||'').trim())return;
+    const id=String(r[10]);if(!/^[a-f0-9-]{36}$/.test(id)||seen[id])fmError_('schema_changed');seen[id]=true;
+    characters.push({id:id,name:String(r[0]).trim(),row:i+2,balance:r[9]===undefined?'':r[9],expense:r[8]===undefined?'':r[8]});
+  });
+  const ledger=header(bankSheets,'_Покупки_бот',FM_LEDGER_HEADERS,10001);
+  const reportSheets=read(FM_REPORT_ID,["'Игроки'!A:F"]),players=header(reportSheets,'Игроки',FM_PLAYERS_HEADERS,10001);
+  return {bank:{sheet:sheet,characters:characters,ledger:ledger},report:{players:players}};
 }
 function fmCatalog_() {
   if(!FM_CATALOG_DATA || !/^[a-f0-9]{16}$/.test(FM_CATALOG_DATA.revision) || FM_CATALOG_DATA.shops.length!==6) fmError_('schema_changed');
@@ -109,7 +138,7 @@ function fmBind_(p,bank,report,user) {
 }
 /** Read-only editor smoke check. Never binds an account or buys an item. */
 function marketCheckRoster() {
-  const bank=fmBank_(),report=fmReport_(),rows=fmRows_(report.players,6);
+  const context=fmFastContext_(),bank=context.bank,report=context.report,rows=fmRows_(report.players,6);
   let bound=0,ready=0,missing=0;
   for(const row of rows) {
     if(!String(row[3]))continue;
@@ -192,7 +221,8 @@ function marketDispatch_(p) {
   const lock=readOnly?null:LockService.getScriptLock();
   if(lock&&!lock.tryLock(p.action==='market_reconcile'?1:20000))return {ok:false,error:'busy'};
   try {
-    const bank=fmBank_(),report=fmReport_();
+    const fast=['market_state','market_checkout','market_order','market_history','market_inventory'].indexOf(p.action)>=0;
+    const context=fast?fmFastContext_():{bank:fmBank_(),report:fmReport_()},bank=context.bank,report=context.report;
     if(p.action==='market_verify') {
       const catalog=fmCatalog_();
       Sheets.Spreadsheets.batchUpdate({requests:[{updateCells:{start:{sheetId:bank.ledger.getSheetId(),rowIndex:0,columnIndex:0},rows:[{values:[{note:'Связь проверена '+fmNow_()}]}],fields:'note'}}]},FM_BANK_ID);

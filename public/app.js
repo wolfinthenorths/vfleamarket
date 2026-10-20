@@ -8,7 +8,10 @@
   const authenticated = Boolean(initialData);
   const scope = tg?.initDataUnsafe?.user?.id || 'guest';
   const cartKey = `flea:cart:v1:${scope}`, pendingKey = `flea:pending:v1:${scope}`;
-  let catalog, byId = {}, carts = {}, state = null, pending = null, busy = false;
+  let catalog, byId = {}, carts = {}, state = null, pending = null, busy = false, stateLoading = null;
+  const identityKey=`flea:identity:v1:${scope}`;
+  let rememberedName='';
+  try{const saved=JSON.parse(localStorage.getItem(identityKey)||'null');if(typeof saved?.name==='string'&&saved.name.length<=100)rememberedName=saved.name;}catch{}
   let category = 'Все', query = '', sort = 'default', activeShop = '', toastTimer;
   const esc = value => String(value ?? '').replace(/\u0451/g,'е').replace(/\u0401/g,'Е').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const caps = value => new Intl.NumberFormat('ru-RU').format(value);
@@ -45,8 +48,11 @@
   }
   async function loadState() {
     if(!authenticated) return null;
-    const result=await api('state'); state=result; wallet(); showNote(''); return result;
+    if(stateLoading)return stateLoading;
+    stateLoading=api('state').then(result=>{state=result;rememberIdentity();wallet();showNote('');return result;}).finally(()=>{stateLoading=null;});
+    return stateLoading;
   }
+  function rememberIdentity(){try{if(state?.character)localStorage.setItem(identityKey,JSON.stringify({name:state.character.name}));else localStorage.removeItem(identityKey);}catch{}}
   function routeValue() { const h=location.hash.slice(1); return h.startsWith('tgWebApp')?'':h; }
   function go(hash) { if(routeValue()===hash) render(); else location.hash=hash; }
   function render() {
@@ -154,6 +160,34 @@
   $('#wallet').addEventListener('click',profile);
   addEventListener('hashchange',()=>{render();window.scrollTo({top:0});});
   try{tg?.BackButton.onClick(()=>{if(dialog.open)dialog.close();else go('');});}catch{}
-  async function init(){if(authenticated&&!pending)openSheet('<span class="eyebrow">Добро пожаловать в экономику постапокалипсиса!</span><h2 id="sheet-title">Назови свое имя и торговцы сразу же предложат товар!</h2><p class="detail-description">Подготавливаем список персонажей…</p>',true);try{const response=await fetch('/catalog.json',{cache:'no-cache'});if(!response.ok)throw new Error();catalog=await response.json();for(const s of catalog.shops)for(const i of s.items)byId[i.id]={...i,shopId:s.id};for(const sid of Object.keys(carts)){if(!shopOf(sid)||!carts[sid]||typeof carts[sid]!=='object'||Array.isArray(carts[sid])){delete carts[sid];continue;}for(const [id,q] of Object.entries(carts[sid]))if(!byId[id]||byId[id].shopId!==sid||!Number.isInteger(q)||q<1||q>99)delete carts[sid][id];}saveCart();render();wallet();if(authenticated){try{await loadState();render();if(!pending)showEntry();}catch(e){showNote(e.message);if(!pending)openSheet(`<h2 id="sheet-title">Проверим счет еще раз?</h2><p class="detail-description">${esc(e.message)}</p><button class="primary wide" data-profile>Повторить проверку</button><button class="text-button wide" data-close>Посмотреть каталог</button>`);}if(pending)submitPending();}}catch{dialog.close();main.innerHTML='<section class="empty"><h2>Ряды еще закрыты</h2><p>Каталог не загрузился. Обновите приложение через несколько секунд.</p><button class="primary" data-reload>Обновить</button></section>';}}
+  async function init(){
+    if(authenticated&&!pending)openSheet(`<span class="eyebrow">Добро пожаловать в экономику постапокалипсиса!</span><h2 id="sheet-title">${rememberedName?esc(rememberedName):'Назови свое имя и торговцы сразу же предложат товар!'}</h2><p class="detail-description">${rememberedName?'Обновляем счет…':'Подготавливаем список персонажей…'}</p><button class="primary wide" data-close>К торговым рядам →</button>`,true);
+    // Start identity lookup immediately, independently of catalog/image loading.
+    // Remembered names are presentation only: state and purchases use verified API data.
+    const identity=authenticated&&!pending?loadState().then(value=>({value}),error=>({error})):null;
+    try{
+      const response=await fetch('/catalog.json',{cache:'no-cache'});if(!response.ok)throw new Error();catalog=await response.json();
+      for(const s of catalog.shops)for(const i of s.items)byId[i.id]={...i,shopId:s.id};
+      for(const sid of Object.keys(carts)){
+        if(!shopOf(sid)||!carts[sid]||typeof carts[sid]!=='object'||Array.isArray(carts[sid])){delete carts[sid];continue;}
+        for(const [id,q] of Object.entries(carts[sid]))if(!byId[id]||byId[id].shopId!==sid||!Number.isInteger(q)||q<1||q>99)delete carts[sid][id];
+      }
+      saveCart();render();wallet();
+      if(authenticated&&pending){submitPending();return;}
+      if(authenticated){
+        const result=await identity;
+        const entryStillOpen=dialog.open&&dialog.classList.contains('entry-screen');
+        if(result.error){
+          showNote(result.error.message);
+          if(!pending&&entryStillOpen)openSheet(`<h2 id="sheet-title">Проверим счет еще раз?</h2><p class="detail-description">${esc(result.error.message)}</p><button class="primary wide" data-profile>Повторить проверку</button><button class="text-button wide" data-close>Посмотреть каталог</button>`);
+        }else{
+          // Do not interrupt shopping or discard an inventory draft when lookup finishes.
+          if(routeValue().startsWith('carts'))renderCarts();
+          if(!pending&&entryStillOpen)showEntry();
+        }
+        if(pending)submitPending();
+      }
+    }catch{dialog.close();main.innerHTML='<section class="empty"><h2>Ряды еще закрыты</h2><p>Каталог не загрузился. Обновите приложение через несколько секунд.</p><button class="primary" data-reload>Обновить</button></section>';}
+  }
   init();
 })();

@@ -38,6 +38,10 @@ function fixture(){
   }}}
  });
  vm.runInContext(source,context);
+ context.Sheets.Spreadsheets.get=(id,{ranges})=>({sheets:ranges.map(range=>{
+  const name=range.match(/^'([^']+)'!/)[1],s=books[id].find(s=>s.name===name);assert(s);
+  return {properties:{sheetId:s.id,title:s.name},data:[{rowData:s.rows.map((row,i)=>({values:row.map((v,j)=>({effectiveValue:typeof v==='number'?{numberValue:v}:typeof v==='boolean'?{boolValue:v}:{stringValue:String(v)},userEnteredValue:s.formulas[(i+1)+':'+(j+1)]?{formulaValue:s.formulas[(i+1)+':'+(j+1)]}:{},note:s.notes[(i+1)+':'+(j+1)]||''}))}))}]};
+ })});
  const user={id:'12345',username:'player'},request={action:'market_checkout',user,orderId:'11111111-1111-4111-8111-111111111111',shopId:'count',revision:catalog.revision,expectedTotal:460,items:[{id:'count-01',quantity:2}]};
  const run=p=>JSON.parse(JSON.stringify(context.marketDispatch_({...request,...p})));
  return {bank,ledger,orders,items,players,flags,run,request,setRevision:value=>vm.runInContext('FM_CATALOG_DATA.revision='+JSON.stringify(value),context)};
