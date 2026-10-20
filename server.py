@@ -25,6 +25,20 @@ DATA = Path(os.environ.get("DATA_DIR", str(ROOT / "local-data")))
 BRIDGE = SheetsBridge(os.environ.get("SHEETS_BRIDGE_URL", ""), os.environ.get("SHEETS_BRIDGE_SECRET", ""))
 STOP = threading.Event()
 RECONCILE_WAKE = threading.Event()
+SESSION_CHARACTERS = {}
+SESSION_LOCK = threading.Lock()
+
+def session_character(key, result=None):
+    """Trusted binding per signed Telegram launch; never accept a client owner."""
+    with SESSION_LOCK:
+        now = time.monotonic()
+        if result is not None:
+            if len(SESSION_CHARACTERS) >= 2048:
+                SESSION_CHARACTERS.clear()
+            SESSION_CHARACTERS[key] = (now, result.get("character"))
+        saved = SESSION_CHARACTERS.get(key)
+        return saved[1] if saved and now - saved[0] < 86400 else None
+
 BRIDGE_STATUS = {"connected": False, "checkedAt": None}
 
 @lru_cache(maxsize=32)
@@ -211,6 +225,7 @@ class Handler(BaseHTTPRequestHandler):
             if not auth.startswith("tma "):
                 raise MarketError("unauthorized", 401)
             user = authenticate(auth[4:], TOKEN)
+            session_key = hashlib.sha256(auth.encode()).hexdigest()
             if not LIMIT.allowed(user["id"]):
                 raise MarketError("busy", 429)
             length = int(self.headers.get("Content-Length", "0"))
@@ -222,6 +237,8 @@ class Handler(BaseHTTPRequestHandler):
             action = path.rsplit("/", 1)[-1]
             if action in ("state", "history"):
                 result = BRIDGE.call(action, user)
+                if action == "state":
+                    session_character(session_key, result)
             elif action in ("inventory", "branch_join", "pack_save"):
                 branch_id = body.get("branchId", "")
                 if not isinstance(branch_id, str) or len(branch_id) > 32:
@@ -233,12 +250,14 @@ class Handler(BaseHTTPRequestHandler):
                     result = BRIDGE.call(action, user, branchId=branch_id, items=items,
                                         version=body.get("version"), requestId=validate_order_id(body.get("requestId")))
                 else:
-                    result = BRIDGE.call(action, user, branchId=branch_id)
+                    character = session_character(session_key) if action == "inventory" else None
+                    result = BRIDGE.call(action, user, branchId=branch_id, **({"sessionCharacter": character} if character else {}))
             elif action == "bind":
                 character_id = body.get("characterId")
                 if not isinstance(character_id, str) or len(character_id) != 36:
                     raise MarketError("invalid_request")
                 result = BRIDGE.call("bind", user, characterId=character_id)
+                session_character(session_key, result)
             elif action == "order":
                 result = BRIDGE.call("order", user, orderId=validate_order_id(body.get("orderId")))
             else:

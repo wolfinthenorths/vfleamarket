@@ -44,6 +44,7 @@
   }
   function showNote(message='') { $('#service-note').textContent=message; $('#service-note').hidden=!message; }
   async function api(path,body={}) {
+    if(path==='inventory'&&stateLoading)await stateLoading;
     const abort = new AbortController(), timer=setTimeout(()=>abort.abort(),62000);
     try {
       const r=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'tma '+initialData},body:JSON.stringify(body),signal:abort.signal,credentials:'same-origin',cache:'no-store'});

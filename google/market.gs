@@ -30,7 +30,7 @@ function fmRows_(sheet,width) {
   return n>1 ? sheet.getRange(2,1,n-1,width).getValues() : [];
 }
 /** Two bounded API snapshots for interactive reads/payments, including headers. */
-function fmFastContext_() {
+function fmFastContext_(sessionCharacter,sessionUser) {
   function read(id,ranges){
     const result=Sheets.Spreadsheets.get(id,{ranges:ranges,fields:'sheets(properties(sheetId,title),data(rowData(values(effectiveValue,userEnteredValue,note))))'});
     const sheets={};
@@ -43,6 +43,14 @@ function fmFastContext_() {
   }
   function header(sheets,name,expected,maxRows){
     const s=sheets[name];if(!s||s.fmValues.length>maxRows||expected.some((h,i)=>s.fmValues[0]?.[i]!==h))fmError_('schema_changed');return s;
+  }
+  // This character is supplied by the HMAC-authenticated app server, from its
+  // verified launch session. Inventory does not rescan the account or balance.
+  if(sessionCharacter){
+    const user=fmUser_(sessionUser),c=sessionCharacter;
+    if(!/^[a-f0-9-]{36}$/.test(String(c.id))||typeof c.name!=='string'||!c.name.trim()||c.name.length>100)fmError_('invalid_request');
+    const sheets=read(FM_BANK_ID,["'_Покупки_бот'!A:G"]),ledger=header(sheets,'_Покупки_бот',FM_LEDGER_HEADERS,10001);
+    return {bank:{characters:[{id:c.id,name:c.name,balance:0}],ledger:ledger},report:{players:{fmValues:[FM_PLAYERS_HEADERS,[c.name,user.id,user.username,c.id]]}}};
   }
   const bankSheets=read(FM_BANK_ID,["'Крышки'!A:K","'_Покупки_бот'!A:G"]);
   const sheet=bankSheets['Крышки'];
@@ -222,7 +230,7 @@ function marketDispatch_(p) {
   if(lock&&!lock.tryLock(p.action==='market_reconcile'?1:20000))return {ok:false,error:'busy'};
   try {
     const fast=['market_state','market_checkout','market_order','market_history','market_inventory'].indexOf(p.action)>=0;
-    const context=fast?fmFastContext_():{bank:fmBank_(),report:fmReport_()},bank=context.bank,report=context.report;
+    const context=fast?fmFastContext_(p.action==='market_inventory'?p.sessionCharacter:null,p.user):{bank:fmBank_(),report:fmReport_()},bank=context.bank,report=context.report;
     if(p.action==='market_verify') {
       const catalog=fmCatalog_();
       Sheets.Spreadsheets.batchUpdate({requests:[{updateCells:{start:{sheetId:bank.ledger.getSheetId(),rowIndex:0,columnIndex:0},rows:[{values:[{note:'Связь проверена '+fmNow_()}]}],fields:'note'}}]},FM_BANK_ID);

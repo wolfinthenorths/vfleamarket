@@ -21,6 +21,48 @@ function fminBranchStates_(character) {
   });
   return FMIN_BRANCH_CACHE[key];
 }
+/** Read-only API view: never opens entire books through SpreadsheetApp.
+ * Cache only tab titles for 30 seconds; cell values and ownership stay live.
+ * Writes continue to use the original native-sheet path under the script lock.
+ */
+function fminReadViews_(character,branchId) {
+  const cache=CacheService.getScriptCache();
+  function tabs(id){
+    const key='fm:tabs:v1:'+id,cached=cache.get(key);
+    if(cached){try{return JSON.parse(cached);}catch(e){}}
+    const list=(Sheets.Spreadsheets.get(id,{fields:'sheets(properties(sheetId,title))'}).sheets||[]).map(s=>s.properties);
+    cache.put(key,JSON.stringify(list),30);return list;
+  }
+  function find(id){
+    const matches=tabs(id).filter(s=>fminNorm_(s.title)===fminNorm_(character.name));
+    if(matches.length>1)fmError_('schema_changed');
+    return matches[0]||null;
+  }
+  function read(id,meta,pack){
+    const firstRow=pack?14:10,firstCol=pack?15:2;
+    const range="'"+meta.title.replace(/'/g,"''")+"'!"+(pack?'O14:V21':'B10:L29');
+    const result=Sheets.Spreadsheets.get(id,{ranges:[range],fields:'sheets(data(rowData(values(formattedValue,effectiveValue,userEnteredValue,note))))'});
+    const grid=result.sheets&&result.sheets[0]&&result.sheets[0].data&&result.sheets[0].data[0];
+    if(!grid)fmError_('schema_changed');
+    const cell=(r,c)=>grid.rowData?.[r-firstRow]?.values?.[c-firstCol]||{};
+    const value=c=>{const v=c.effectiveValue||{};return v.numberValue!==undefined?v.numberValue:v.boolValue!==undefined?v.boolValue:v.stringValue!==undefined?v.stringValue:v.errorValue?'#ERROR!':'';};
+    return {fmCell:cell,getName:()=>meta.title,getSheetId:()=>meta.sheetId,getParent:()=>({getId:()=>id}),getRange:a1=>{
+      const match=String(a1).match(/^([A-Z]+)([0-9]+)(?::([A-Z]+)([0-9]+))?$/);if(!match)fmError_('schema_changed');
+      const col=t=>t.split('').reduce((n,ch)=>n*26+ch.charCodeAt(0)-64,0),r=Number(match[2]),c=col(match[1]),last=Number(match[4]||match[2]);
+      return {getValue:()=>value(cell(r,c)),getDisplayValue:()=>String(cell(r,c).formattedValue||''),getNote:()=>cell(r,c).note||'',getValues:()=>Array.from({length:last-r+1},(_,i)=>[value(cell(r+i,c))])};
+    }};
+  }
+  const sourceMeta=find(FMIN_BOOK);
+  if(!sourceMeta)return {source:null,states:[]};
+  const source=read(FMIN_BOOK,sourceMeta,false);
+  if(!fminStatsReady_(source))return {source:source,states:[]};
+  const states=FMIN_BRANCHES.map(b=>({id:b.id,chapter:b.chapter,meta:find(b.book),sheet:null}));
+  const existing=states.filter(b=>b.meta),selected=branchId?fminBranch_(branchId):existing.length===1?fminBranch_(existing[0].id):null;
+  states.forEach(b=>{if(b.meta)b.sheet={};});
+  const target=selected&&!fminWrongBranch_(selected,states)?states.find(b=>b.id===selected.id):null;
+  if(target&&target.meta)target.sheet=read(selected.book,target.meta,true);
+  return {source:source,states:states};
+}
 function fminWrongBranch_(branch,states) {
   return !states.find(b=>b.id===branch.id).sheet&&states.some(b=>b.chapter===branch.chapter&&b.sheet);
 }
@@ -66,6 +108,7 @@ function fminCells_(sheet,pack) {
   const columns=pack?[15,16,18,20,22]:[5,6,8,10,12],rows=pack?[17,19,21]:[25,27,29];
   const name="'"+sheet.getName().replace(/'/g,"''")+"'!",startRow=pack?17:25,startCol=pack?15:5;
   // Read text, notes and formulas in one consistent snapshot instead of 45 RPCs.
+  if(sheet.fmCell)return columns.map(col=>rows.map(row=>fminCell_(row,col,sheet.fmCell(row,col))));
   const result=Sheets.Spreadsheets.get(sheet.getParent().getId(),{
     ranges:[name+(pack?'O17:V21':'E25:L29')],
     fields:'sheets(data(rowData(values(formattedValue,userEnteredValue,note))))'
@@ -155,13 +198,13 @@ function fminPack_(branch,sheet,index) {
     items:selected,version:version,saved:saved,headerPrefix:note.prefix,cells:cells,sheet:sheet};
 }
 function fminPublicPack_(pack) {return {branchId:pack.branchId,chapter:pack.chapter,capacity:pack.capacity,used:pack.used,manualSlots:pack.manualSlots,manualUnknown:pack.manualUnknown,manualItems:pack.manualItems,items:pack.items,version:pack.version};}
-function fminInventory_(p,bank,report,user) {
+function fminInventory_(p,bank,report,user,fast) {
   const character=fmCurrent_(bank,report,user);if(!character)fmError_('not_bound');
-  const source=fminSource_(character);
+  const views=fast?fminReadViews_(character,p.branchId):null,source=views?views.source:fminSource_(character);
   if(!source)return {ok:true,character:{id:character.id,name:character.name},waiting:true,notice:FMIN_WAIT,items:[],branches:[],pack:null};
   const index=fminIndex_(),owned=fminOwned_(bank,character,source,index,false);
   if(!fminStatsReady_(source))return {ok:true,character:{id:character.id,name:character.name},waiting:true,notice:'Характеристики персонажа еще не заполнены.',items:owned.items,branches:[],pack:null};
-  const states=fminBranchStates_(character),branches=states.map(b=>({id:b.id,chapter:b.chapter,hasSheet:Boolean(b.sheet)}));
+  const states=views?views.states:fminBranchStates_(character),branches=states.map(b=>({id:b.id,chapter:b.chapter,hasSheet:Boolean(b.sheet)}));
   const existing=branches.filter(b=>b.hasSheet),selected=p.branchId?fminBranch_(p.branchId):existing.length===1?fminBranch_(existing[0].id):null;
   const incorrect=selected&&fminWrongBranch_(selected,states);
   const target=selected&&!incorrect?states.find(b=>b.id===selected.id).sheet:null;
@@ -243,7 +286,7 @@ function fminSave_(p,bank,report,user) {
   return fminInventory_(p,bank,report,user);
 }
 function fmInventoryDispatch_(p,bank,report,user) {
-  if(p.action==='market_inventory')return fminInventory_(p,bank,report,user);
+  if(p.action==='market_inventory')return fminInventory_(p,bank,report,user,true);
   if(p.action==='market_branch_join')return fminJoin_(p,bank,report,user);
   if(p.action==='market_pack_save')return fminSave_(p,bank,report,user);
   fmError_('invalid_request');
@@ -260,4 +303,14 @@ function marketCheckInventory() {
     })});
   });
   console.log(JSON.stringify(result));return result;
+}
+
+/** Read-only timing check for the exact inventory read path, without user tokens. */
+function marketCheckInventorySpeed() {
+  const started=Date.now(),character={id:'speed-check',name:'Эшвейл'};
+  const views=fminReadViews_(character,'2.4'),index=fminIndex_();
+  if(!views.source)fmError_('character_sheet_missing');
+  const cells=fminCells_(views.source,false),state=views.states.find(b=>b.id==='2.4');
+  const pack=state&&state.sheet?fminPack_(fminBranch_('2.4'),state.sheet,index):null;
+  console.log(JSON.stringify({ok:true,milliseconds:Date.now()-started,ready:fminStatsReady_(views.source),branches:views.states.length,slots:pack&&pack.capacity,manualColumns:cells.length}));
 }

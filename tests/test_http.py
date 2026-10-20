@@ -29,6 +29,25 @@ class HTTPTests(unittest.TestCase):
         server.DATA, server.TOKEN = cls.old_data, cls.old_token
         cls.temp.cleanup()
 
+    def setUp(self):
+        server.SESSION_CHARACTERS.clear()
+
+    def test_inventory_reuses_verified_launch_character_and_ignores_client_claim(self):
+        auth={"Authorization": "tma " + signed()}
+        character={"id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","name":"Test Survivor"}
+        def bridge(action, user, **fields):
+            return {"ok":True,"character":character} if action=="state" else {"ok":True,"items":[]}
+        with patch.object(server.BRIDGE,"call",side_effect=bridge) as call:
+            self.assertEqual(self.request("POST","/api/state",extra_headers=auth)[0],200)
+            for _ in range(2):
+                self.assertEqual(self.request("POST","/api/inventory",{"sessionCharacter":{"id":"forged"}},extra_headers=auth)[0],200)
+                self.assertEqual(call.call_args.kwargs["sessionCharacter"],character)
+            self.assertEqual([c.args[0] for c in call.call_args_list],["state","inventory","inventory"])
+            # A different signed launch must not inherit the previous binding.
+            other={"Authorization":"tma "+signed(query_id="different-launch")}
+            self.request("POST","/api/inventory",extra_headers=other)
+            self.assertNotIn("sessionCharacter",call.call_args.kwargs)
+
     def request(self, method, path, data=None, auth=False, extra_headers=None):
         con = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
         headers = {"Content-Type": "application/json"}

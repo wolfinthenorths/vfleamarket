@@ -19,7 +19,7 @@ class Sheet{
  };return range;}
 }
 function fixture(){
- let nextId=1,writes=0;
+ let nextId=1,writes=0,opens=0,reads=0;
  const books={};for(const id of [mainId,...Object.values(branchIds)])books[id]={id,sheets:[],getId(){return this.id;},getSheets(){return this.sheets;}};
  const cache=new Map();
  const add=(book,name)=>{const s=new Sheet(nextId++,name,books[book]);books[book].sheets.push(s);return s;};
@@ -32,25 +32,32 @@ function fixture(){
   fmError_:code=>{throw new Error(code);},fmNow_:()=> '20.10.2026 12:00',fmCatalog_:()=>catalog,fmRows_:ledger=>ledger,
   fmParseOrder_:entry=>JSON.parse(entry.values[5]),fmCurrent_:(_bank,_report,u)=>u.id===user.id?character:null,
   Utilities:{Charset:{UTF_8:1},DigestAlgorithm:{SHA_256:1},computeDigest:(_,text)=>[...crypto.createHash('sha256').update(text).digest()]},
-  SpreadsheetApp:{openById:id=>{assert(books[id],id);return books[id];},flush(){}},
+  SpreadsheetApp:{openById:id=>{opens++;assert(books[id],id);return books[id];},flush(){}},
   CacheService:{getScriptCache:()=>({get:key=>cache.get(key)||null,put:(key,value)=>cache.set(key,value)})},
   Sheets:{Spreadsheets:{batchUpdate(body,id){assert(books[id],id);writes++;for(const request of body.requests){const q=request.updateCells;assert(q);const sheet=books[id].sheets.find(s=>s.id===q.start.sheetId);assert(sheet);q.rows.forEach((row,i)=>row.values.forEach((cell,j)=>{const key=(q.start.rowIndex+1+i)+':'+(q.start.columnIndex+1+j);if(q.fields.includes('userEnteredValue')){if(cell.userEnteredValue?.formulaValue)sheet.formulas[key]=cell.userEnteredValue.formulaValue;else sheet.values[key]=cell.userEnteredValue?.stringValue??cell.userEnteredValue?.numberValue??'';}if(q.fields.includes('note'))sheet.notes[key]=cell.note;}));}}}}
  });
  vm.runInContext(source,context);
  context.Sheets.Spreadsheets.get=(id,options)=>{
+  reads++;
+  if(!options.ranges)return {sheets:books[id].sheets.map(s=>({properties:{sheetId:s.id,title:s.name}}))};
   const match=options.ranges[0].match(/^'((?:[^']|'')*)'!(.*)$/);assert(match);
   const sheet=books[id].sheets.find(s=>s.name===match[1].replace(/''/g,"'"));assert(sheet);
   const [r,c,h,w]=a1(match[2]);return {sheets:[{data:[{rowData:Array.from({length:h},(_,i)=>({values:Array.from({length:w},(_,j)=>{
-   const key=(r+i)+':'+(c+j);return {formattedValue:String(sheet.values[key]??''),note:sheet.notes[key]||'',userEnteredValue:sheet.formulas[key]?{formulaValue:sheet.formulas[key]}:{}};
+   const key=(r+i)+':'+(c+j),raw=sheet.values[key]??'',formatted=sheet.getRange(r+i,c+j).getDisplayValue();return {formattedValue:formatted,effectiveValue:typeof raw==='number'?{numberValue:raw}:{stringValue:String(raw)},note:sheet.notes[key]||'',userEnteredValue:sheet.formulas[key]?{formulaValue:sheet.formulas[key]}:{}};
   })}))}]}]};
  };
  const purchase=(quantity=2)=>{const item=catalog.shops[0].items[0],id='receipt-'+orders.length;orders.push([id,'',character.id,user.id,0,JSON.stringify({id,userId:user.id,character,lines:[{id:item.id,name:item.name,quantity,slots:item.slots}]}),true]);};purchase();
  const reset=()=>vm.runInContext('for(const k in FMIN_BOOK_CACHE)delete FMIN_BOOK_CACHE[k];for(const k in FMIN_BRANCH_CACHE)delete FMIN_BRANCH_CACHE[k];',context);
  const run=(action='market_inventory',fields={})=>{reset();return JSON.parse(JSON.stringify(context.fmInventoryDispatch_({action,branchId:'2.4',...fields},bank,{},fields.user||user)));};
  const save=(inventory,quantity,extra={})=>run('market_pack_save',{version:inventory.pack.version,requestId:'11111111-1111-4111-8111-111111111111',items:quantity?[{id:'count-01',quantity}]:[],...extra});
- return {books,main,pack,other,orders,purchase,run,save,user,sync:()=>{reset();return context.fmSyncInventories_(bank);},get writes(){return writes;}};
+ return {books,main,pack,other,orders,purchase,run,save,user,sync:()=>{reset();return context.fmSyncInventories_(bank);},get writes(){return writes;},get opens(){return opens;},get reads(){return reads;}};
 }
 let tests=0;function test(name,fn){fn();tests++;console.log('PASS',name);}
+test('inventory display reads two live cell snapshots and never opens native books',()=>{
+ const f=fixture();let r=f.run();assert.equal(f.opens,0);assert.equal(f.reads,7);assert.equal(r.pack.capacity,9);
+ const before=f.reads;f.main.getRange('H25').setValue('Ментаты × 3');f.pack.getRange('B16').setValue(6);
+ r=f.run();assert.equal(f.opens,0);assert.equal(f.reads-before,2);assert.equal(r.items[0].quantity,5);assert.equal(r.pack.capacity,7);assert.equal(f.writes,0);
+});
 test('full ownership includes purchases older than the former 25-order window',()=>{const f=fixture();for(let i=0;i<30;i++)f.purchase(1);assert.equal(f.run().items[0].quantity,32);});
 test('inventory reads do not write; background mirror is idempotent and preserves manual possessions',()=>{const f=fixture();f.main.getRange('H25').setValue('Ментаты × 3');let r=f.run();assert.equal(r.items[0].quantity,5);assert.equal(f.writes,0);assert.equal(f.sync().synced,1);const count=f.writes;r=f.run();assert.equal(r.items[0].quantity,5);assert.equal(f.sync().synced,0);assert.equal(f.writes,count);assert.match(f.main.getRange('H25').getValue(),/Ментаты × 3/);});
 test('backpack saves update visible cells without debiting or removing inventory',()=>{const f=fixture(),r=f.run();assert.equal(r.pack.capacity,9);const saved=f.save(r,2);assert.equal(saved.pack.used,2);assert.equal(saved.items[0].quantity,2);assert.match(f.pack.getRange('R17').getValue(),/Ментаты × 2/);assert.equal(f.orders.length,1);});

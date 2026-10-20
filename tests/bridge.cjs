@@ -44,10 +44,18 @@ function fixture(){
  })});
  const user={id:'12345',username:'player'},request={action:'market_checkout',user,orderId:'11111111-1111-4111-8111-111111111111',shopId:'count',revision:catalog.revision,expectedTotal:460,items:[{id:'count-01',quantity:2}]};
  const run=p=>JSON.parse(JSON.stringify(context.marketDispatch_({...request,...p})));
- return {bank,ledger,orders,items,players,flags,run,request,setRevision:value=>vm.runInContext('FM_CATALOG_DATA.revision='+JSON.stringify(value),context)};
+ return {bank,ledger,orders,items,players,flags,run,request,fastSession:(c,u)=>context.fmFastContext_(c,u),setRevision:value=>vm.runInContext('FM_CATALOG_DATA.revision='+JSON.stringify(value),context)};
 }
 let tests=0;function test(name,fn){fn();tests++;console.log('PASS',name);}
 function reconcile(f){assert.equal(f.run({action:'market_reconcile'}).ok,true);}
+test('inventory session reads receipts without looking up the player or current balance again',()=>{
+ const f=fixture(),character={id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',name:'Test Survivor'};
+ f.players.rows=[];f.bank.rows=[];
+ const result=f.fastSession(character,{id:'12345',username:'player'});
+ assert.equal(result.bank.characters[0].id,character.id);assert.equal(result.report.players.fmValues[1][1],'12345');
+ assert.equal(result.bank.ledger.fmValues.length,1);
+ assert.throws(()=>f.fastSession({id:'forged',name:'Test'},{id:'12345',username:'player'}),/invalid_request/);
+});
 test('payment returns its durable receipt before background mirrors',()=>{const f=fixture(),r=f.run();assert.equal(r.ok,true);assert.equal(r.reportSynced,false);assert.equal(f.bank.rows[1][8],460);assert.equal(f.bank.rows[1][9],540);assert.equal(f.bank.formulas['2:10'],'=1000-I2');assert.equal(f.ledger.rows.length,2);assert.equal(f.orders.rows.length,1);assert.equal(f.ledger.rows[1][6],false);reconcile(f);assert.equal(f.orders.rows.length,2);assert.equal(f.items.rows[1][6],2);assert.equal(f.items.rows[1][8],460);assert.match(f.bank.notes['2:9'],/Ментаты × 2/);assert.equal(f.ledger.rows[1][6],true);});
 test('double click and retry produce one receipt and one debit',()=>{const f=fixture();f.run();const r=f.run();assert.equal(r.replayed,true);assert.equal(f.flags.bankCommits,1);reconcile(f);assert.equal(f.orders.rows.length,2);});
 test('uncertain successful bank commit is recovered by the same id',()=>{const f=fixture();f.flags.uncertain=true;assert.equal(f.run().error,'connection_failed');const r=f.run();assert.equal(r.ok,true);assert.equal(r.replayed,true);assert.equal(f.flags.bankCommits,1);assert.equal(f.bank.rows[1][8],460);reconcile(f);assert.equal(f.orders.rows.length,2);});
