@@ -9,7 +9,7 @@ function launch({authenticated,pending=false}){
  vm.runInNewContext(source,context);
  return {dialog:node('#sheet'),content:node('#sheet-content'),wallet:node('#balance-label'),requests};
 }
-const fresh=launch({authenticated:true});assert.equal(fresh.dialog.open,true);assert.match(fresh.content.innerHTML,/Назови свое имя и торговцы сразу же предложат товар!/);assert.match(fresh.content.innerHTML,/Добро пожаловать в экономику постапокалипсиса!/);assert.match(fresh.content.innerHTML,/data-close/);assert.equal(fresh.requests,2);
+const fresh=launch({authenticated:true});assert.equal(fresh.dialog.open,true);assert.match(fresh.content.innerHTML,/Назови свое имя и торговцы сразу же предложат товар!/);assert.match(fresh.content.innerHTML,/Добро пожаловать на Блошиный рынок!/);assert.match(fresh.content.innerHTML,/data-close/);assert.equal(fresh.requests,2);
 const guest=launch({authenticated:false});assert.equal(guest.dialog.open,false);assert.equal(guest.requests,1);
 assert.match(fresh.wallet.innerHTML,/Загружается…/);assert.match(fresh.wallet.innerHTML,/wallet-spinner/);assert.doesNotMatch(fresh.wallet.innerHTML,/Выбрать/);
 const recovery=launch({authenticated:true,pending:true});assert.equal(recovery.dialog.open,false);assert.equal(recovery.requests,1);
