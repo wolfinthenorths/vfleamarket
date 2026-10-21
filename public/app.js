@@ -13,6 +13,11 @@
   let rememberedName='';
   try{const saved=JSON.parse(localStorage.getItem(identityKey)||'null');if(typeof saved?.name==='string'&&saved.name.length<=100)rememberedName=saved.name;}catch{}
   let category = 'Все', query = '', sort = 'default', activeShop = '', toastTimer;
+  const pagePositions=new Map(),shopViews=new Map();
+  let renderedRoute=null,restoringPosition=false,renderVersion=0;
+  if(typeof history!=='undefined')history.scrollRestoration='manual';
+  function rememberPosition(){if(!restoringPosition&&renderedRoute===routeValue())pagePositions.set(renderedRoute,window.scrollY||0);}
+  addEventListener('scroll',rememberPosition,{passive:true});
   const esc = value => String(value ?? '').replace(/\u0451/g,'е').replace(/\u0401/g,'Е').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const caps = value => new Intl.NumberFormat('ru-RU').format(value);
   const counted = (n,one,few,many) => `${n} ${n%100>=11&&n%100<=14?many:n%10===1?one:n%10>=2&&n%10<=4?few:many}`;
@@ -28,10 +33,11 @@
 
   function toast(message) { clearTimeout(toastTimer); $('#toast').textContent = message; $('#toast').classList.add('visible'); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 3200); }
   function saveCart() { try { localStorage.setItem(cartKey, JSON.stringify(carts)); } catch {} updateCount(); }
-  function updateCount() { const n = Object.values(carts).reduce((sum,c) => sum + Object.values(c || {}).reduce((s,q) => s + q,0),0); $('#cart-count').textContent = n; $('#cart-count').hidden = !n; }
+  function updateCount() { const n = Object.values(carts).reduce((sum,c) => sum + Object.values(c || {}).reduce((s,q) => s + q,0),0); $('#cart-count').textContent = n; $('#cart-count').hidden = !n;const total=$('#cart-total');if(total){total.hidden=!n;total.textContent=caps(grandTotal())+' кр.';} }
   const shopOf = id => catalog.shops.find(s => s.id === id);
   function linesFor(id) { return Object.entries(carts[id] || {}).filter(([key,q]) => byId[key]?.shopId === id && Number.isInteger(q) && q > 0 && q <= 99).map(([key,q]) => ({...byId[key],quantity:q,total:q*byId[key].price})); }
   const totalFor = id => linesFor(id).reduce((s,i) => s+i.total,0);
+  const grandTotal = () => (catalog?.shops||[]).reduce((sum,s)=>sum+totalFor(s.id),0);
   const countFor = id => linesFor(id).reduce((s,i) => s+i.quantity,0);
   const quantityControl = (id,quantity,context='') => `<div class="quantity" aria-label="Количество"><button data-change="${id}" data-delta="-1" data-context="${context}" aria-label="Убрать одну штуку">−</button><span>${quantity}</span><button data-change="${id}" data-delta="1" data-context="${context}" aria-label="Добавить одну штуку" ${quantity>=99?'disabled':''}>+</button></div>`;
   function picture(s) { return s.banner ? `<div class="shop-art"><img src="${s.banner}" data-poster="${s.poster || ''}" alt="${esc(s.name)}" loading="lazy"></div>` : `<div class="shop-art nuka-art" aria-label="Автомат Нюка-Колы">${[s.items[0],s.items[1],s.items[7]].map(i=>`<img src="${i.image}" alt="" loading="lazy">`).join('')}</div>`; }
@@ -63,11 +69,14 @@
   }
   function rememberIdentity(){rememberedName=state?.character?.name||'';try{if(rememberedName)localStorage.setItem(identityKey,JSON.stringify({name:rememberedName}));else localStorage.removeItem(identityKey);}catch{}}
   function routeValue() { const h=location.hash.slice(1); return h.startsWith('tgWebApp')?'':h; }
-  function go(hash) { if(routeValue()===hash) render(); else location.hash=hash; }
+  function go(hash) { rememberPosition();if(routeValue()===hash) render(); else location.hash=hash; }
   function render() {
     if(!catalog) return;
     window.BackpackView?.stop();
     const route=routeValue();
+    const position=route===renderedRoute?(window.scrollY||0):(pagePositions.get(route)||0),version=++renderVersion;
+    if(activeShop)shopViews.set(activeShop,{category,query,sort});
+    renderedRoute=route;restoringPosition=true;
     document.querySelectorAll('[data-nav]').forEach(a=>{ const current=a.dataset.nav==='market' ? !route || route.startsWith('shop/') : route.startsWith(a.dataset.nav) || a.dataset.nav==='inventory' && route==='history'; a.toggleAttribute('aria-current',current); if(current)a.setAttribute('aria-current','page'); });
     try { if(route) tg?.BackButton.show(); else tg?.BackButton.hide(); } catch {}
     if(route.startsWith('shop/') && shopOf(route.split('/')[1])) renderStore(route.split('/')[1]);
@@ -75,13 +84,15 @@
     else if(route==='inventory'||route==='history') renderInventory();
     else renderHome();
     updateCount(); applyMotion();
+    const restore=()=>{if(version!==renderVersion)return;window.scrollTo({top:position,behavior:'instant'});restoringPosition=false;};
+    if(typeof requestAnimationFrame==='function')requestAnimationFrame(restore);else restore();
   }
   function renderHome() {
     activeShop='';
     main.innerHTML=`<section class="intro"><div><span class="eyebrow">Торговые ряды Блошиного рынка</span><h1>Впервые у нас,<br>Выживший?</h1><p>Скорее подходи к торговым рядам!</p><span class="market-stamp">6 магазинов · 136 товаров</span></div><figure class="market-art"><img src="/assets/banners/market.gif" data-poster="/assets/banners/market.webp" alt="Блошиный рынок Dawn of the Dead"><figcaption><span>FLEA MARKET</span><span>НАЙДЕТСЯ ВСЕ!</span></figcaption></figure></section><div class="section-head"><h2>Торговые ряды</h2><small>ВЫБЕРИТЕ МАГАЗИН</small></div><section class="shops-grid" aria-label="Магазины">${catalog.shops.map((s,n)=>`<a class="shop-card" href="#shop/${s.id}" >${picture(s)}<div class="shop-info"><span class="eyebrow">0${n+1} / ${esc(s.tagline)}</span><h3>${esc(s.name)}</h3><p>${esc(s.shortDescription)}</p><div class="shop-foot"><span>${counted(s.items.length,'товар','товара','товаров')}${countFor(s.id)?` · в корзине ${countFor(s.id)}`:''}</span><span class="arrow" aria-hidden="true">↗</span></div></div></a>`).join('')}</section>${!authenticated?'<p class="guest-note">Каталог открыт для просмотра. Для покупок и своего баланса откройте магазин в <a href="https://t.me/vfleamarketbot">@vfleamarketbot ↗</a>.</p>':''}`;
   }
   function renderStore(id) {
-    if(activeShop!==id){category='Все';query='';sort='default';activeShop=id;}
+    if(activeShop!==id){const saved=shopViews.get(id);category=saved?.category||'Все';query=saved?.query||'';sort=saved?.sort||'default';activeShop=id;}
     const s=shopOf(id);
     main.innerHTML=`<a class="back-link" href="#"><span>←</span> Все магазины</a><section class="store-hero"><div><span class="eyebrow">${esc(s.tagline)} / БЛОШИНЫЙ РЫНОК</span><h1>${esc(s.name)}</h1><p>${esc(s.description)}</p><span class="store-badge">${counted(s.items.length,'товар','товара','товаров')} <span aria-hidden="true">·</span> Оплата крышками</span></div>${picture(s)}</section><div class="shop-toolbar"><div class="search-row"><label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></svg><input id="search" type="search" placeholder="Найти предмет…" aria-label="Найти предмет" value="${esc(query)}" autocomplete="off"></label><select id="sort" aria-label="Сортировка"><option value="default">По порядку</option><option value="price-asc">Сначала дешевле</option><option value="price-desc">Сначала дороже</option><option value="name">По названию</option></select></div><div class="category-list" aria-label="Категории">${['Все',...new Set(s.items.map(i=>i.category))].map(c=>`<button class="category" data-category="${esc(c)}" aria-pressed="${c===category}">${esc(c)}</button>`).join('')}</div></div><div class="product-meta"><span id="results-count"></span><span>Нажмите на товар — подробнее</span></div><section id="products" class="products" aria-label="Товары"></section><div id="store-cart-holder"></div>`;
     $('#sort').value=sort; $('#search').addEventListener('input',e=>{query=e.target.value;renderProducts();}); $('#sort').addEventListener('change',e=>{sort=e.target.value;renderProducts();});
@@ -96,11 +107,12 @@
     $('#products').innerHTML=items.map(i=>`<article class="product"><button class="product-open" data-detail="${i.id}" aria-label="${esc(i.name)} — подробнее"><span class="product-image"><img src="${i.image}" alt="" loading="lazy"></span><span class="product-kicker">${esc(i.category)} · ${i.slots} сл.</span><h3>${esc(i.name)}</h3><span class="product-effect">${esc(i.effects[0]?.replace(/^Баффы: /,'') || i.description.split('.')[0])}</span></button><div class="product-foot"><span class="price">${caps(i.price)} <small>кр.</small></span>${carts[activeShop]?.[i.id]?quantityControl(i.id,carts[activeShop][i.id]):`<button class="add-button" data-change="${i.id}" data-delta="1" aria-label="В корзину: ${esc(i.name)}">+</button>`}</div></article>`).join('');
     if(!items.length)$('#products').innerHTML='<p class="page-lead">Ничего не нашлось. Попробуйте другое название.</p>';
   }
-  function renderStoreCart(){if(!$('#store-cart-holder'))return;const n=countFor(activeShop);$('#store-cart-holder').innerHTML=n?`<a href="#carts/${activeShop}" class="store-cart-bar"><span>В корзине: ${n}<small>${esc(shopOf(activeShop).name)}</small></span><span>${caps(totalFor(activeShop))} кр. <span aria-hidden="true">→</span></span></a>`:'';}
+  function renderStoreCart(){if(!$('#store-cart-holder'))return;const total=grandTotal(),n=countFor(activeShop);$('#store-cart-holder').innerHTML=total?`<a href="#carts" class="store-cart-bar"><span>Все корзины<small>${n?`Этот магазин: ${caps(totalFor(activeShop))} кр.`:'Из всех магазинов'}</small></span><span>${caps(total)} кр. <span aria-hidden="true">→</span></span></a>`:'';}
   function pendingHtml(){return pending?'<section class="pending-box"><h2>Проверяем покупку</h2><p>Касса еще не подтвердила результат. Сохранен номер заказа — повторная проверка не спишет крышки еще раз.</p><button class="primary" data-retry '+(busy?'disabled':'')+'>'+(busy?'Получаем ответ…':'Проверить результат')+'</button></section>':'';}
   function renderCarts() {
     activeShop='';const only=routeValue().split('/')[1];let groups=catalog.shops.filter(s=>linesFor(s.id).length);if(only&&groups.some(s=>s.id===only))groups=groups.filter(s=>s.id===only);
     main.innerHTML=`<h1 class="page-title">Ваши корзины</h1><p class="page-lead">Каждый магазин оформляет свою покупку отдельно.</p>${pendingHtml()}${groups.length?groups.map(s=>{const lines=linesFor(s.id),total=totalFor(s.id);return `<section class="cart-group"><div class="cart-group-head"><h2>${esc(s.name)}</h2><a href="#shop/${s.id}">В магазин ↗</a></div>${lines.map(i=>`<div class="cart-row"><img src="${i.image}" alt=""><div><h3>${esc(i.name)}</h3><p>${caps(i.price)} кр. за шт. · ${i.slots} сл.</p></div><div><div class="row-total">${caps(i.total)} <small>кр.</small></div>${quantityControl(i.id,i.quantity,'cart')}</div></div>`).join('')}<div class="cart-foot"><div><small>${counted(countFor(s.id),'предмет','предмета','предметов')} · ${counted(lines.reduce((n,i)=>n+i.slots*i.quantity,0),'слот','слота','слотов')}</small><span class="price">${caps(total)} <small>крышек</small></span></div><button class="primary" data-checkout="${s.id}" ${busy||pending?'disabled':''}>${authenticated ? state?.character ? 'К покупке →' : 'Выбрать персонажа' : 'Открыть в Telegram ↗'}</button>${state?.character?`<div class="balance-check ${state.balance<total?'insufficient':''}"><span>На счете: ${caps(state.balance)} кр.</span><span>${state.balance<total?`Не хватает ${caps(total-state.balance)} кр.`:`После покупки: ${caps(state.balance-total)} кр.`}</span></div>`:''}</div></section>`;}).join(''):`<section class="empty">${icon}<h2>Пока пусто</h2><p>Загляните в торговые ряды и добавьте понравившиеся предметы.</p><a class="primary" href="#">К магазинам →</a></section>`}`;
+    if(grandTotal())main.insertAdjacentHTML('afterbegin',`<section class="cart-overview" aria-label="Общая сумма всех корзин"><span>Всего во всех корзинах</span><strong>${caps(grandTotal())} <small>крышек</small></strong></section>`);
     if(only)main.insertAdjacentHTML('beforeend','<a class="text-button" href="#carts">Все корзины</a>');
   }
   function renderInventory() {
@@ -150,6 +162,7 @@
   }
   document.addEventListener('click',e=>{
     const b=e.target.closest('button,a');if(!b)return;
+    if(b.tagName==='A'&&b.getAttribute('href')?.startsWith('#'))rememberPosition();
     if(b.hasAttribute('data-character-toggle'))toggleCharacters($('#character-options').hidden);
     else if(b.dataset.character)selectCharacter(b.dataset.character);
     else if(b.hasAttribute('data-close'))dialog.close();
@@ -168,7 +181,7 @@
   });
   dialog.addEventListener('click',e=>{if(e.target===dialog){const r=dialog.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)dialog.close();}});
   $('#wallet').addEventListener('click',profile);
-  addEventListener('hashchange',()=>{render();window.scrollTo({top:0});});
+  addEventListener('hashchange',render);
   try{tg?.BackButton.onClick(()=>{if(dialog.open)dialog.close();else go('');});}catch{}
   async function init(){
     if(authenticated&&!pending)openSheet(`<span class="eyebrow">Добро пожаловать на Блошиный рынок!</span><h2 id="sheet-title">${rememberedName?esc(rememberedName):'Назови свое имя и торговцы сразу же предложат товар!'}</h2><p class="detail-description">${rememberedName?'Обновляем счет…':'Подготавливаем список персонажей…'}</p><button class="primary wide" data-close>К торговым рядам →</button>`,true);
@@ -201,3 +214,4 @@
   }
   init();
 })();
+

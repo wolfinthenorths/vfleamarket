@@ -58,7 +58,7 @@ function fmFastContext_(sessionCharacter,sessionUser) {
   const seen={},characters=[];
   sheet.fmValues.slice(1).forEach((r,i)=>{
     if(!String(r[0]||'').trim())return;
-    const id=String(r[10]);if(!/^[a-f0-9-]{36}$/.test(id)||seen[id])fmError_('schema_changed');seen[id]=true;
+    const id=String(r[10]||'');if(!id.trim())return;if(!/^[a-f0-9-]{36}$/.test(id)||seen[id])fmError_('schema_changed');seen[id]=true;
     characters.push({id:id,name:String(r[0]).trim(),row:i+2,balance:r[9]===undefined?'':r[9],expense:r[8]===undefined?'':r[8]});
   });
   const ledger=header(bankSheets,'_Покупки_бот',FM_LEDGER_HEADERS,10001);
@@ -78,7 +78,7 @@ function fmBank_() {
   const result=[],seen={};
   values.forEach((r,i)=>{
     if(!String(r[0]).trim())return;
-    const id=String(r[10]);
+    const id=String(r[10]||'');if(!id.trim())return;
     if(!/^[a-f0-9-]{36}$/.test(id)||seen[id])fmError_('schema_changed');
     seen[id]=true;result.push({id:id,name:String(r[0]).trim(),row:i+2,balance:r[9],expense:r[8]});
   });
@@ -87,6 +87,28 @@ function fmBank_() {
 function fmReport_() {
   const book=SpreadsheetApp.openById(FM_REPORT_ID);
   return {book:book,orders:fmHeader_(book,'Заказы',FM_ORDERS_HEADERS),items:fmHeader_(book,'Покупки',FM_ITEMS_HEADERS),players:fmHeader_(book,'Игроки',FM_PLAYERS_HEADERS)};
+}
+/** Complete only blank technical IDs; never guess a player/character pairing.
+ * Runs inside the existing reconciliation write lock. */
+function fmRegisterCharacters_() {
+  const book=SpreadsheetApp.openById(FM_BANK_ID),sheet=book.getSheetByName('Крышки');
+  if(!sheet||sheet.getLastRow()>1000||sheet.getRange(1,11).getValues()[0][0]!=='ID персонажа')fmError_('schema_changed');
+  const rows=sheet.getRange(2,1,Math.max(1,sheet.getLastRow()-1),11).getValues(),byName={},seen={},requests=[];
+  const norm=s=>String(s||'').trim().toLowerCase().replace(/ё/g,'е').replace(/\s+/g,' ');
+  rows.forEach((r,i)=>{
+    if(!String(r[0]||'').trim())return;
+    const id=String(r[10]||'').trim()||Utilities.getUuid();
+    if(!/^[a-f0-9-]{36}$/.test(id)||seen[id])fmError_('schema_changed');seen[id]=true;
+    (byName[norm(r[0])]||(byName[norm(r[0])]=[])).push(id);
+    if(!String(r[10]||'').trim())requests.push({updateCells:{start:{sheetId:sheet.getSheetId(),rowIndex:i+1,columnIndex:10},rows:[{values:[fmCell_(id)]}],fields:'userEnteredValue'}});
+  });
+  if(requests.length)Sheets.Spreadsheets.batchUpdate({requests:requests},FM_BANK_ID);
+  const report=SpreadsheetApp.openById(FM_REPORT_ID),players=fmHeader_(report,'Игроки',FM_PLAYERS_HEADERS),links=[];
+  fmRows_(players,6).forEach((r,i)=>{
+    const ids=byName[norm(r[0])];
+    if(!String(r[3]||'').trim()&&ids&&ids.length===1)links.push({updateCells:{start:{sheetId:players.getSheetId(),rowIndex:i+1,columnIndex:3},rows:[{values:[fmCell_(ids[0])]}],fields:'userEnteredValue'}});
+  });
+  if(links.length)Sheets.Spreadsheets.batchUpdate({requests:links},FM_REPORT_ID);
 }
 function fmUser_(user) {
   if(!user || !/^[1-9][0-9]{0,15}$/.test(String(user.id)) || typeof user.username!=='string' || user.username.length>64) fmError_('unauthorized');
@@ -112,7 +134,7 @@ function fmEligible_(bank,report,user) {
   const rows=fmRows_(report.players,6);
   const matches=rows.filter(r=>!String(r[1]) && fmUsername_(r[2])===username);
   if(matches.length>1)fmError_('schema_changed');
-  return matches.map(r=>{
+  return matches.filter(r=>String(r[3]||'').trim()).map(r=>{
     const character=bank.characters.find(c=>c.id===String(r[3]));
     if(!character || rows.filter(other=>String(other[3])===character.id).length!==1)fmError_('schema_changed');
     return {id:character.id,name:character.name};
@@ -229,6 +251,7 @@ function marketDispatch_(p) {
   const lock=readOnly?null:LockService.getScriptLock();
   if(lock&&!lock.tryLock(p.action==='market_reconcile'?1:20000))return {ok:false,error:'busy'};
   try {
+    if(p.action==='market_reconcile')fmRegisterCharacters_();
     const fast=['market_state','market_checkout','market_order','market_history','market_inventory'].indexOf(p.action)>=0;
     const context=fast?fmFastContext_(p.action==='market_inventory'?p.sessionCharacter:null,p.user):{bank:fmBank_(),report:fmReport_()},bank=context.bank,report=context.report;
     if(p.action==='market_verify') {
@@ -263,3 +286,4 @@ function marketDispatch_(p) {
     return {ok:false,error:allowed.indexOf(String(error.message))>=0?String(error.message):'connection_failed'};
   } finally {if(lock)lock.releaseLock();}
 }
+

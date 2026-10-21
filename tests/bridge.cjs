@@ -20,7 +20,7 @@ function fixture(){
  const books={[bankId]:[bank,ledger],[reportId]:[orders,items,players]};
  const flags={reportFail:false,uncertain:false,locked:false,bankCommits:0};
  const context=vm.createContext({console,Date,JSON,Set,Number,String,Math,Error,
-  Utilities:{Charset:{UTF_8:1},DigestAlgorithm:{SHA_256:1},formatDate:()=> '20.10.2026 04:00:00',computeDigest:(_,s)=>Array.from(crypto.createHash('sha256').update(s).digest())},
+  Utilities:{getUuid:()=>crypto.randomUUID(),Charset:{UTF_8:1},DigestAlgorithm:{SHA_256:1},formatDate:()=> '20.10.2026 04:00:00',computeDigest:(_,s)=>Array.from(crypto.createHash('sha256').update(s).digest())},
   CacheService:{getScriptCache:()=>({get:()=>JSON.stringify(catalog),put(){}})},
   SpreadsheetApp:{openById:id=>({getSheetByName:name=>books[id].find(s=>s.name===name)}),flush(){}},
   LockService:{getScriptLock:()=>({tryLock:()=>!flags.locked,releaseLock(){}})},
@@ -48,6 +48,15 @@ function fixture(){
 }
 let tests=0;function test(name,fn){fn();tests++;console.log('PASS',name);}
 function reconcile(f){assert.equal(f.run({action:'market_reconcile'}).ok,true);}
+test('unfinished new rows never take the cashier offline and registration fills only blank IDs',()=>{
+ const f=fixture();f.bank.rows.push(['Хук',0,0,0,0,0,0,0,'',350,'']);
+ f.players.rows.push(['Хук','','@hookplayer','','','']);f.players.rows.push(['Алиса','','@alice','','','']);
+ assert.equal(f.run({action:'market_state'}).ok,true);
+ assert.equal(f.run({action:'market_state',user:{id:'99999',username:'alice'}}).availableCharacters.length,0);
+ reconcile(f);const id=f.bank.rows[2][10];assert.match(id,/^[a-f0-9-]{36}$/);assert.equal(f.players.rows[2][3],id);assert.equal(f.players.rows[3][3],'');
+ assert.equal(f.run({action:'market_state',user:{id:'99999',username:'hookplayer'}}).availableCharacters[0].id,id);
+ reconcile(f);assert.equal(f.bank.rows[2][10],id);assert.equal(f.bank.rows[1][10],'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+});
 test('inventory session reads receipts without looking up the player or current balance again',()=>{
  const f=fixture(),character={id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',name:'Test Survivor'};
  f.players.rows=[];f.bank.rows=[];
@@ -97,3 +106,4 @@ test('bound numeric id survives a username change and a recycled username cannot
  assert.equal(f.run({action:'market_bind',user:{id:'67890',username:'player'},characterId:f.bank.rows[1][10]}).error,'character_taken');
 });
 console.log(`${tests} transaction tests passed; zero live balances used.`);
+

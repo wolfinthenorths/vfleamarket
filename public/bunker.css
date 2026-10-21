@@ -46,3 +46,8 @@ dialog{background:var(--card);border-color:#8e9275;border-radius:0;box-shadow:0 
 .wallet-spinner{animation:pack-refresh-spin 1.2s linear infinite}
 @media(max-width:520px){.wallet-status{font-size:17px}.wordmark{gap:9px}.brand-cap{width:40px;height:40px}}
 @media(prefers-reduced-motion:reduce){.wallet-spinner{animation-duration:2.8s}}
+.bottom-nav #cart-total:not([hidden]){display:block;font-size:10px;line-height:1.2;color:var(--gold,#d6b777);white-space:nowrap;margin-top:2px}
+.cart-overview{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 24px;margin:0 0 28px;border:1px solid #a59e76;background:#394332;color:#f0e7cd}
+.cart-overview>span{font-size:15px}.cart-overview strong{font:32px Georgia,serif;white-space:nowrap}.cart-overview small{font:13px Arial,sans-serif;color:#d6b777}
+@media(max-width:520px){.cart-overview{padding:18px 16px;gap:12px}.cart-overview>span{max-width:45%;font-size:14px}.cart-overview strong{font-size:28px}}
+
