@@ -243,7 +243,7 @@ function sysPerkLayoutRequests_(id,kind,offset) {
       merge(row,row,7,13);
       put(row,62,'=IF($A$2="";"";LET(perks;'+sysOwnedPerksExpr_()+';IF(perks="";"";IFERROR(INDEX(SPLIT(perks;CHAR(10));1;'+(n+1)+');""))))');
       put(row,6,sysPerkImageFormula_(key,44));
-      put(row,7,n?'='+key:'=IF($A$2="";"";IF('+key+'="";"Нет полученных перков";'+key+'))');
+      put(row,7,sysAcquiredPerkLabelFormula_(row,n===0));
     }
     heights(38+shift,43,21);heights(44,44,32);heights(45,64,48);heights(65,70,21);
     r.push(sysReadablePerkFormat_(range(title,title,6,13),'795064','Calibri',12,true,'CENTER','ffffff'));
@@ -251,6 +251,7 @@ function sysPerkLayoutRequests_(id,kind,offset) {
     r.push(sysPerkBorderRequest_(range(title,title,6,13),'795064','SOLID_MEDIUM'));
     const line={style:'SOLID',colorStyle:{rgbColor:sysPerkColor_('3f3f3f')}};
     r.push({updateBorders:{range:range(first,first+19,6,13),top:line,bottom:line,left:line,right:line,innerHorizontal:line,innerVertical:line}});
+    r.push(sysPerkBorderRequest_(range(first,first,6,13),'795064','SOLID'));
   }else{
     merge(32,32,5,12);put(32,5,'Перки персонажа');r.push(sysPerkPaint_(range(32,32,5,12),'805b73','ffffff',true));
     merge(33,33,5,6);merge(33,33,8,12);put(33,5,'Тип');put(33,8,'Название');r.push(sysPerkPaint_(range(33,36,5,12),'d9becb','202020',false));
@@ -259,7 +260,7 @@ function sysPerkLayoutRequests_(id,kind,offset) {
     ['Классовый','Пассивные','Активные'].forEach((label,i)=>{
       const row=34+i,key='$BJ'+row,first='INDEX(SPLIT('+key+';" • ";FALSE);1;1)';
       merge(row,row,5,6);merge(row,row,8,12);put(row,5,label);put(row,8,'=IF('+key+'="";"—";'+key+')');
-      put(row,7,i?sysPerkImageFormula_('IFERROR('+first+';"")',44):'=IF($BJ34="";"";IFNA(IMAGE(VLOOKUP(TRIM($C$2);$AN$1:$AP$3;3;FALSE);4;44;44);""))');
+      put(row,7,i?sysPerkImageFormula_('IFERROR('+first+';"")',44):'=IF($BJ34="";"";IFNA(IMAGE(VLOOKUP(TRIM($C$2);$AN$1:$AP$3;3;FALSE);1);""))');
     });
     heights(34,54,36);heights(32,32,32);heights(33,33,28);heights(34,36,56);
     r.push(sysReadablePerkFormat_(range(32,32,5,12),'795064','Arial',12,true,'CENTER','ffffff'));
@@ -340,10 +341,11 @@ function sysPerkBorderRequest_(range,color,style) {
 }
 function sysPerkRuleRequests_(sheet,kind,offset) {
   if(kind==='core'||kind==='character')return [];
-  const marker='DOTD_ACQUIRED_PERKS_V4';
+  const marker='DOTD_ACQUIRED_PERKS_V5';
   if(sheet.getConditionalFormatRules().some(rule=>(rule.getBooleanCondition()?.getCriteriaValues()||[]).some(v=>String(v).includes(marker))))return [];
   const first=45;
-  return [{addConditionalFormatRule:{index:0,rule:{ranges:[sysPerkRange_(sheet.getSheetId(),first,first+19,6,13)],booleanRule:{condition:{type:'CUSTOM_FORMULA',values:[{userEnteredValue:'=AND(N("'+marker+'")=0;$BJ'+first+'<>"")'}]},format:{backgroundColorStyle:{rgbColor:sysPerkColor_('f7eef2')},textFormat:{foregroundColorStyle:{rgbColor:sysPerkColor_('202020')}}}}}}}];
+  const remove=[];sheet.getConditionalFormatRules().forEach((rule,i)=>{if((rule.getBooleanCondition()?.getCriteriaValues()||[]).some(v=>String(v).includes('DOTD_ACQUIRED_PERKS_V4')))remove.unshift({deleteConditionalFormatRule:{sheetId:sheet.getSheetId(),index:i}});});
+  return remove.concat([{addConditionalFormatRule:{index:0,rule:{ranges:[sysPerkRange_(sheet.getSheetId(),first,first+19,6,13)],booleanRule:{condition:{type:'CUSTOM_FORMULA',values:[{userEnteredValue:'=AND(N("'+marker+'")=0;OR(ROW()='+first+';$BJ'+first+'<>""))'}]},format:{backgroundColorStyle:{rgbColor:sysPerkColor_('f7eef2')},textFormat:{foregroundColorStyle:{rgbColor:sysPerkColor_('202020')}}}}}}}]);
 }
 
 /** Personal sheets show acquired perks only; class details stay in the roll card. */
@@ -364,4 +366,9 @@ function sysPersonalPerksRequests_(id) {
 function sysPerkEmphasisRequests_(id,kind,offset) {
   const ranges=kind==='core'||kind==='character'?[sysPerkRange_(id,32,36,5,12)]:[sysPerkRange_(id,4,8,1,4),sysPerkRange_(id,23+offset,28+offset,6,13),sysPerkRange_(id,30+offset,37+offset,6,13),sysPerkRange_(id,44,64,6,13)];
   return ranges.map(range=>({repeatCell:{range,cell:{userEnteredFormat:{horizontalAlignment:'CENTER',verticalAlignment:'MIDDLE',textFormat:{bold:true,fontSize:12}}},fields:'userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat.bold,userEnteredFormat.textFormat.fontSize'}}));
+}
+
+function sysAcquiredPerkLabelFormula_(row,first) {
+  const key='$BJ'+row,empty=first?'Нет полученных перков':'';
+  return '=IF($A$2="";"";IF('+key+'="";"'+empty+'";IFNA(XLOOKUP('+sysPerkNorm_(key)+';ARRAYFORMULA('+sysPerkNorm_('$AQ$2:$AQ$21')+');$AR$2:$AR$21);"Тип не указан")&" • "&'+key+'))';
 }
