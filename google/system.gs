@@ -167,7 +167,8 @@ function sysJoin_(p,bank,report,user) {
     const template=fminTemplate_(branch,core.kind),created=template.copyTo(target.book);
     created.setName('_market_pending_'+character.id.slice(0,8));
     created.getRange('H2:H5').setValues([[0],[0],[0],[0]]);created.getRange('M2:M7').setValues([[0],[0],[0],[0],[0],[0]]);
-    created.getRange('R11:S12').clearContent();created.getRange('O14').clearNote();created.getRange('G25').setValue('пусто');created.getRange('G32').setValue('пусто');
+    const perkOffset=sysPerkOffset_(created);
+    created.getRange('R11:S12').clearContent();created.getRange('O14').clearNote();created.getRange(25+perkOffset,7).setValue('пусто');created.getRange(32+perkOffset,7).setValue('пусто');
     sysConfigureSheet_(created,'roll',character.name);created.setName(character.name);target.sheet=created;SpreadsheetApp.flush();
   }
   return sysInventory_(p,bank,report,user);
