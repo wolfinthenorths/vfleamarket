@@ -3,6 +3,7 @@
 The shared module runs inside the existing signed Protectoron Apps Script project alongside the market, inventory and perk bridge. No additional public endpoint is created, and the deployment URLs and HMAC secret remain unchanged.
 
 - Master character worksheet: A2 name, C2 class, C6:D6 XP, B10:B15 attributes, B17:B36 skill ownership. Character and roll worksheets read by A2. A missing source never falls back to donor values.
+- Personal character sheets also read the master's six attribute analyses (H2, H3, H5, H7, H9, H11) and twenty skill analyses (P2, P3, P5 through P39). Edit that prose in the master. A hidden inline BQ1:CP39 import carries the source name alongside the text, so copied sheets follow A2 and suppress donor prose while the new source loads. Existing text formatting and merged panels remain intact.
 - Controller perk ledger: immutable receipts determine paid skill point spending. Both the shop and character sheets derive the balance from master XP and those receipts. Registry F/G are a presentation cache.
 - Master E63:L92: GM grants. E item, I quantity (default 1), K slots (catalog default), L category (catalog default). Unknown custom items remain visible and require a slot value before packing. A copied worksheet's unchanged donor grants are ignored and cleared on reconciliation.
 - Market receipt ledger + GM grants + migrated manual stock − `Списания вещей`: total ownership. `Рюкзаки` holds one canonical packet per character/chapter. Free inventory is ownership minus its packet. Returning an item restores the free count.

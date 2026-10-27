@@ -29,9 +29,10 @@ function sysConfigureSheet_(sheet,kind,defaultName,bindingsOnly) {
   sysBackUp_(sheet);
   const id=sheet.getSheetId(),book=sheet.getParent(),requests=[],isRoll=kind!=='character'&&kind!=='core';
   const originalClass=String(sheet.getRange('C2').getDisplayValue()).trim(),name=kind==='template'?'':defaultName||String(sheet.getRange('A2').getDisplayValue()).trim();
-  if(sheet.getMaxColumns()<68)requests.push({appendDimension:{sheetId:id,dimension:'COLUMNS',length:68-sheet.getMaxColumns()}});
+  const columns=kind==='character'?94:68;
+  if(sheet.getMaxColumns()<columns)requests.push({appendDimension:{sheetId:id,dimension:'COLUMNS',length:columns-sheet.getMaxColumns()}});
   if(sheet.getMaxRows()<1001)requests.push({appendDimension:{sheetId:id,dimension:'ROWS',length:1001-sheet.getMaxRows()}});
-  requests.push({updateDimensionProperties:{range:{sheetId:id,dimension:'COLUMNS',startIndex:26,endIndex:68},properties:{hiddenByUser:true},fields:'hiddenByUser'}});
+  requests.push({updateDimensionProperties:{range:{sheetId:id,dimension:'COLUMNS',startIndex:26,endIndex:columns},properties:{hiddenByUser:true},fields:'hiddenByUser'}});
   const formulas=sheet.getRange(1,1,Math.min(926,sheet.getMaxRows()),26).getFormulas();
   formulas.forEach((row,r)=>row.forEach((f,c)=>{if(!f)return;const changed=sysShiftOldReferences_(f);if(changed!==f)requests.push(sysCellRequest_(id,r+1,c+1,changed));}));
   const put=(r,c,v)=>requests.push(sysCellRequest_(id,r,c,v));
@@ -93,6 +94,7 @@ function sysConfigureSheet_(sheet,kind,defaultName,bindingsOnly) {
     requests.push({setDataValidation:{range:{sheetId:id,startRowIndex:62,endRowIndex:92,startColumnIndex:8,endColumnIndex:10},rule:{condition:{type:'NUMBER_GREATER_THAN_EQ',values:[{userEnteredValue:'0'}]},strict:true,showCustomUi:true}}});
   }
   requests.push(...sysDescriptionRequests_(id,kind));
+  requests.push(...sysAnalysisRequests_(id,kind));
   if(isRoll)requests.push(...sysSelectionRequests_(sheet),...sysTopClassRequests_(id));
   Sheets.Spreadsheets.batchUpdate({requests:requests},book.getId());
 }
@@ -139,13 +141,27 @@ function systemInstall() {
     const targets=[{id:SYS_CORE,kind:'core'}].concat(SYS_TARGETS),start=Number(props.getProperty('DOTD_SYSTEM_INSTALL_INDEX')||0),end=Math.min(start+3,targets.length);
     for(let i=start;i<end;i++){
       const target=targets[i],book=SpreadsheetApp.openById(target.id),sheets=book.getSheets().filter(s=>!s.getName().startsWith('_'));
-      const requests=sheets.flatMap(sheet=>{const id=sheet.getSheetId(),r=[];if(sheet.getMaxColumns()<68)r.push({appendDimension:{sheetId:id,dimension:'COLUMNS',length:68-sheet.getMaxColumns()}});r.push({updateDimensionProperties:{range:{sheetId:id,dimension:'COLUMNS',startIndex:26,endIndex:68},properties:{hiddenByUser:true},fields:'hiddenByUser'}});if(target.kind!=='core'&&target.kind!=='character')r.push(...sysSelectionRequests_(sheet),...sysTopClassRequests_(id));return r.concat(sysStockRequests_(id,target.kind),sysDescriptionRequests_(id,target.kind));});
+      const requests=sheets.flatMap(sheet=>{const id=sheet.getSheetId(),r=[],columns=target.kind==='character'?94:68;if(sheet.getMaxColumns()<columns)r.push({appendDimension:{sheetId:id,dimension:'COLUMNS',length:columns-sheet.getMaxColumns()}});r.push({updateDimensionProperties:{range:{sheetId:id,dimension:'COLUMNS',startIndex:26,endIndex:columns},properties:{hiddenByUser:true},fields:'hiddenByUser'}});if(target.kind!=='core'&&target.kind!=='character')r.push(...sysSelectionRequests_(sheet),...sysTopClassRequests_(id));return r.concat(sysStockRequests_(id,target.kind),sysDescriptionRequests_(id,target.kind),sysAnalysisRequests_(id,target.kind));});
       Sheets.Spreadsheets.batchUpdate({requests:requests},book.getId());
       props.setProperty('DOTD_SYSTEM_INSTALL_INDEX',String(i+1));
     }
     if(end===targets.length){props.setProperty('DOTD_SYSTEM_VERSION','2');props.deleteProperty('DOTD_SYSTEM_MIGRATING');const check=sysRefresh_();console.log(JSON.stringify({complete:true,checked:check}));return {complete:true,checked:check};}
     console.log(JSON.stringify({complete:false,processed:end,total:targets.length,next:'Run systemInstall again'}));return {complete:false,processed:end,total:targets.length};
   }finally{lock.releaseLock();}
+}
+
+/** GM analysis follows the name, including when a personal character sheet is copied. */
+function sysAnalysisRequests_(id,kind) {
+  if(kind!=='character')return [];
+  // Import the source name with the text so an asynchronous name change cannot show donor prose.
+  const requests=[sysCellRequest_(id,1,69,sysNameImport_(SYS_CORE,'A1:Z39'))];
+  const bind=(row,col)=>{
+    const source='$'+sysCol_(68+col)+'$'+row;
+    requests.push(sysCellRequest_(id,row,col,'=IFERROR(IF(AND($A$2<>"";$BQ$2=TRIM($A$2));IF('+source+'="";"";'+source+');"");"")'));
+  };
+  [2,3,5,7,9,11].forEach(row=>bind(row,8));
+  [2].concat(Array.from({length:19},(_,i)=>3+i*2)).forEach(row=>bind(row,16));
+  return requests;
 }
 
 /** Inline descriptions remain attached when a roll worksheet is copied to a branch. */
