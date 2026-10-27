@@ -101,7 +101,7 @@ def bot_worker():
             text = message.get("text", "").split()[0].split("@")[0] if message.get("text") else ""
             private = message.get("chat", {}).get("type") == "private"
             if private and text in ("/start", "/shop", "/help"):
-                answer = ("Блошиный рынок открыт.\n\nВыберите магазин, соберите корзину и подтвердите покупку. Оплата — крышками со счета вашего Выжившего.\n\nПриобретенные предметы и квитанции остаются в разделе «Инвентарь».")
+                answer = ("Блошиный рынок открыт.\n\nВыберите магазин, соберите корзину и подтвердите покупку. Оплата — крышками с вашего счета.\n\nПриобретенные предметы и квитанции остаются в разделе «Инвентарь».")
                 result = telegram("sendMessage", {"chat_id": message["chat"]["id"], "text": answer,
                     "reply_markup": {"inline_keyboard": [[{"text": "Открыть торговые ряды", "web_app": {"url": APP_URL}}]]}})
                 if result is None:

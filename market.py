@@ -24,12 +24,12 @@ ERRORS = {
     "invalid_balance": "Не удалось прочитать баланс. Обратитесь к Смотрителю.",
     "balance_formula": "Не удалось завершить покупку. Попробуйте позже.",
     "schema_changed": "Касса временно недоступна. Попробуйте позже.",
-    "character_not_found": "Выживший не найден в реестре системы.",
-    "character_taken": "Этот Выживший уже зарегистрирован на другой аккаунт. Обратитесь к Смотрителю.",
-    "character_not_allowed": "Не удалось выбрать Выжившего.",
-    "username_required": "Для регистрации нужно имя пользователя Telegram. Укажите его в настройках Telegram и сообщите Смотрителю.",
-    "already_bound": "Выживший уже выбран.",
-    "not_bound": "Сначала выберите Выжившего.",
+    "character_not_found": "Ваша запись не найдена в реестре системы.",
+    "character_taken": "Указанное имя уже связано с другим аккаунтом. Обратитесь к Смотрителю.",
+    "character_not_allowed": "Не удалось выбрать имя.",
+    "username_required": "Укажите @username в настройках Telegram и сообщите его Смотрителю.",
+    "already_bound": "Вы уже зарегистрированы в системе.",
+    "not_bound": "Сначала выберите имя.",
     "id_conflict": "Не удалось завершить покупку. Проверьте результат.",
     "invalid_request": "Не удалось обработать запрос.",
     "order_not_found": "Покупка еще не зарегистрирована.",
@@ -45,7 +45,7 @@ ERRORS = {
     "character_sheet_missing": "Дождитесь своего листа или напомните о нем!",
     "branch_sheet_missing": "Выберите ветку!",
     "template_not_found": "Рюкзак пока недоступен. Попробуйте позже.",
-    "invalid_character_stats": "В реестре системы пока не заполнены характеристики Выжившего. Ожидайте.",
+    "invalid_character_stats": "В реестре системы пока не заполнены ваши характеристики. Ожидайте.",
     "manual_slots_unknown": "Не удалось сохранить рюкзак. Попробуйте позже.",
 }
 
@@ -155,7 +155,7 @@ class SheetsBridge:
             code = result.get("error", "connection_failed") if isinstance(result, dict) else "connection_failed"
             raise MarketError(code, 503 if code in ("connection_failed", "busy", "not_configured", "schema_changed") else 409)
         if "bindingNotice" in result:
-            result["bindingNotice"] = "Если вашего Выжившего нет в списке, то обратитесь к Смотрителю."
+            result["bindingNotice"] = "Если вашего имени нет в списке, то обратитесь к Смотрителю."
         if result.get("notice") == "Характеристики персонажа еще не заполнены.":
             result["notice"] = ERRORS["invalid_character_stats"]
         return result
