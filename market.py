@@ -21,15 +21,15 @@ ERRORS = {
     "invalid_cart": "Проверьте содержимое корзины.",
     "catalog_changed": "Каталог обновился. Проверьте цены и подтвердите покупку снова.",
     "not_enough_caps": "Для этой покупки не хватает крышек.",
-    "invalid_balance": "Не удалось прочитать баланс. Обратитесь к мастеру.",
+    "invalid_balance": "Не удалось прочитать баланс. Обратитесь к Смотрителю.",
     "balance_formula": "Не удалось завершить покупку. Попробуйте позже.",
     "schema_changed": "Касса временно недоступна. Попробуйте позже.",
-    "character_not_found": "Персонаж не найден в таблице балансов.",
-    "character_taken": "Этот персонаж уже связан с другим аккаунтом. Обратитесь к мастеру.",
-    "character_not_allowed": "Не удалось выбрать персонажа.",
-    "username_required": "Для первой привязки нужен Telegram username. Укажите его в настройках Telegram и сообщите мастеру.",
-    "already_bound": "Персонаж уже выбран.",
-    "not_bound": "Сначала выберите своего персонажа.",
+    "character_not_found": "Выживший не найден в реестре системы.",
+    "character_taken": "Этот Выживший уже зарегистрирован на другой аккаунт. Обратитесь к Смотрителю.",
+    "character_not_allowed": "Не удалось выбрать Выжившего.",
+    "username_required": "Для регистрации нужно имя пользователя Telegram. Укажите его в настройках Telegram и сообщите Смотрителю.",
+    "already_bound": "Выживший уже выбран.",
+    "not_bound": "Сначала выберите Выжившего.",
     "id_conflict": "Не удалось завершить покупку. Проверьте результат.",
     "invalid_request": "Не удалось обработать запрос.",
     "order_not_found": "Покупка еще не зарегистрирована.",
@@ -45,7 +45,7 @@ ERRORS = {
     "character_sheet_missing": "Дождитесь своего листа или напомните о нем!",
     "branch_sheet_missing": "Выберите ветку!",
     "template_not_found": "Рюкзак пока недоступен. Попробуйте позже.",
-    "invalid_character_stats": "В общей сводке пока не заполнены характеристики персонажа. Ожидайте.",
+    "invalid_character_stats": "В реестре системы пока не заполнены характеристики Выжившего. Ожидайте.",
     "manual_slots_unknown": "Не удалось сохранить рюкзак. Попробуйте позже.",
 }
 
@@ -155,7 +155,7 @@ class SheetsBridge:
             code = result.get("error", "connection_failed") if isinstance(result, dict) else "connection_failed"
             raise MarketError(code, 503 if code in ("connection_failed", "busy", "not_configured", "schema_changed") else 409)
         if "bindingNotice" in result:
-            result["bindingNotice"] = "Если вашего персонажа нет в списке, то обратитесь к Гейм-Мастеру."
+            result["bindingNotice"] = "Если вашего Выжившего нет в списке, то обратитесь к Смотрителю."
         if result.get("notice") == "Характеристики персонажа еще не заполнены.":
             result["notice"] = ERRORS["invalid_character_stats"]
         return result

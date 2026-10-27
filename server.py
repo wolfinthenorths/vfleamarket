@@ -86,7 +86,7 @@ def bot_worker():
         return
     telegram("setChatMenuButton", {"menu_button": {"type": "web_app", "text": "Блошиный рынок", "web_app": {"url": APP_URL}}})
     telegram("setMyCommands", {"commands": [{"command": "start", "description": "Открыть Блошиный рынок"}, {"command": "shop", "description": "Магазины и корзины"}, {"command": "help", "description": "Как покупать за крышки"}]})
-    telegram("setMyDescription", {"description": "Добро пожаловать на Блошиный рынок, Выживший!\n\nМентаты, двустволка и кукла Вуду уже ждет — скорее трать свои крышки."})
+    telegram("setMyDescription", {"description": "Добро пожаловать на Блошиный рынок, Выживший!\n\nМентаты, двустволка и кукла Вуду уже ждут — скорее трать свои крышки."})
     telegram("setMyShortDescription", {"short_description": "Торговые ряды Блошиного рынка."})
     with db() as con:
         row = con.execute("SELECT value FROM settings WHERE key='telegram_offset'").fetchone()
@@ -101,7 +101,7 @@ def bot_worker():
             text = message.get("text", "").split()[0].split("@")[0] if message.get("text") else ""
             private = message.get("chat", {}).get("type") == "private"
             if private and text in ("/start", "/shop", "/help"):
-                answer = ("Блошиный рынок открыт.\n\nВыберите магазин, соберите корзину и подтвердите покупку. Оплата — внутриигровыми крышками с баланса вашего персонажа.\n\nПриобретенные предметы и квитанции остаются в разделе «Инвентарь».")
+                answer = ("Блошиный рынок открыт.\n\nВыберите магазин, соберите корзину и подтвердите покупку. Оплата — крышками со счета вашего Выжившего.\n\nПриобретенные предметы и квитанции остаются в разделе «Инвентарь».")
                 result = telegram("sendMessage", {"chat_id": message["chat"]["id"], "text": answer,
                     "reply_markup": {"inline_keyboard": [[{"text": "Открыть торговые ряды", "web_app": {"url": APP_URL}}]]}})
                 if result is None:
