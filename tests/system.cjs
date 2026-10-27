@@ -1,0 +1,41 @@
+/* Exercise the production shared-state module with isolated ledgers and sheets. */
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),crypto=require('node:crypto');
+const catalog=require('../public/catalog.json');
+const c=vm.createContext({console,Date,JSON,Math,Number,String,Error,Set,
+  fmCatalog_:()=>catalog,
+  Utilities:{DigestAlgorithm:{SHA_256:1},Charset:{UTF_8:1},computeDigest:(_,x)=>[...crypto.createHash('sha256').update(x).digest()]},
+  PropertiesService:{getScriptProperties:()=>({getProperty:()=>null})}
+});
+for(const name of ['inventory.gs','system.gs','templates.gs'])vm.runInContext(fs.readFileSync(__dirname+'/../google/'+name,'utf8'),c);
+let checks=0;function test(name,fn){fn();checks++;console.log('PASS',name);}const plain=x=>JSON.parse(JSON.stringify(x));
+const index=c.fminIndex_(),item=Object.values(index.byId).find(i=>i.slots>0&&i.slots<=2),name='Альбедо';
+test('XP thresholds and paid perk spending share one balance',()=>{assert.deepEqual(plain(c.sysProgressValues_(70,4)),{level:4,earned:9,points:5});assert.throws(()=>c.sysProgressValues_(0,2),/invalid_balance/);});
+const paid=['', '', '', 2, '', '', '', 'order-1','char-1','sharp_eye','paid'];
+test('Receipt retries do not double charge skill points',()=>assert.equal(c.sysSpent_([paid,paid],'char-1'),2));
+test('Conflicting receipt or duplicate ownership stops calculation',()=>{const conflict=[...paid];conflict[3]=4;assert.throws(()=>c.sysSpent_([paid,conflict],'char-1'),/id_conflict/);const duplicate=[...paid];duplicate[7]='other';assert.throws(()=>c.sysSpent_([paid,duplicate],'char-1'),/already_owned/);});
+test('Free and class perks never consume points',()=>{const free=[...paid];free[10]='free';free[3]=0;assert.equal(c.sysSpent_([free],'char-1'),0);});
+test('GM quantity defaults and catalog slots resolve',()=>{const g=c.sysGrant_([item.name+' × 3','','',''],index);assert.equal(g.quantity,3);assert.equal(g.id,item.id);assert.equal(g.slots,item.slots);});
+test('Custom GM items stay visible while slots await entry',()=>{const g=c.sysGrant_(['Записка','','',''],index);assert.equal(g.quantity,1);assert.equal(g.slots,null);assert.equal(g.category,'Прочее');assert.throws(()=>c.sysGrant_(['Записка',-1,'',''],index),/invalid_pack/);});
+test('Purchases, grants, legacy stock and consumption reconcile',()=>{const r=c.sysOwnedValues_([{...item,quantity:2}],[[item.name,3,'','']],[[name,item.name,1,item.category,item.slots]],[[name,item.name,2,'']],index,name);assert.equal(r[0].quantity,4);assert.throws(()=>c.sysOwnedValues_([],[],[],[[name,item.name,1,'']],index,name),/item_not_owned/);});
+test('Copied character does not inherit donor GM grants',()=>{const rows=[['Записка',1,0,'Прочее'],['Ключ',2,1,'Прочее']];const result=c.sysSeparateCopiedGrants_(rows,[rows[0],['Ключ',1,1,'Прочее']]);assert.deepEqual(plain(result.clear),[0]);assert.deepEqual(plain(result.grants),[rows[1]]);});
+test('Packed items leave free inventory without erasing ownership',()=>{const s=c.sysFreeValues_([{...item,quantity:3}],[{...item,quantity:2}]);assert.equal(s.items[0].ownedQuantity,3);assert.equal(s.items[0].freeQuantity,1);assert.equal(s.items[0].packedQuantity,2);assert.equal(c.sysFreeValues_([{...item,quantity:3}],[]).items[0].freeQuantity,3);});
+test('Orphan packed item is visible and flagged for GM',()=>{const s=c.sysFreeValues_([],[{...item,quantity:1}]);assert.equal(s.errors.length,1);assert.equal(s.items[0].freeQuantity,0);});
+let row=null,writes=0;
+const character={id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',name};
+const owned=[{...item,quantity:3}],capacity=10;
+c.fmNow_=()=> '27.10.2026';c.fmRow_=values=>({values:values.map(v=>({userEnteredValue:typeof v==='number'?{numberValue:v}:{stringValue:String(v)}}))});
+c.sysState_=()=>({character,core:{stats:[10,10,10,10,10,10],kind:'Житель'},tables:{packs:{id:1,rows:row?[[],row]:[[]]}},row:row?{i:0,r:row}:null,owned,stock:c.sysFreeValues_(owned,row?JSON.parse(row[4]):[]),branches:[],pack:{chapter:'2',branchId:'2.1',capacity,items:row?JSON.parse(row[4]):[],version:c.fminHash_(row)},waiting:false});
+c.sysPublishCharacter_=()=>{};c.Sheets={Spreadsheets:{batchUpdate:body=>{writes++;row=body.requests[0].updateCells.rows[0].values.map(c=>c.userEnteredValue.numberValue??c.userEnteredValue.stringValue);}}};
+const payload=()=>({requestId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',version:c.fminHash_(row),items:[{id:item.id,quantity:2}]});
+test('Pack save commits exactly once, retry is idempotent',()=>{const p=payload();const result=c.sysSavePack_(p);assert.equal(writes,1);assert.equal(result.items[0].freeQuantity,1);c.sysSavePack_(p);assert.equal(writes,1);});
+test('Conflicting request ID and stale versions are rejected',()=>{assert.throws(()=>c.sysSavePack_({...payload(),items:[{id:item.id,quantity:1}]}),/id_conflict/);assert.throws(()=>c.sysSavePack_({...payload(),requestId:'cccccccc-cccc-4ccc-8ccc-cccccccccccc',version:'old'}),/pack_changed/);});
+test('Foreign items and quantities cannot enter a pack',()=>{assert.throws(()=>c.sysSavePack_({...payload(),items:[{id:'foreign',quantity:1}]}),/item_not_owned/);assert.throws(()=>c.sysSavePack_({...payload(),items:[{id:item.id,quantity:4}]}),/item_not_owned/);});
+test('Removing a packed item restores inventory',()=>{const p={...payload(),requestId:'dddddddd-dddd-4ddd-8ddd-dddddddddddd',items:[]};const result=c.sysSavePack_(p);assert.equal(result.items[0].freeQuantity,3);assert.equal(row[4],'[]');});
+test('Description formulas use the shared catalog and hidden perk names',()=>{const req=c.sysDescriptionRequests_(1,'roll');const at=(r,col)=>req.find(x=>x.updateCells?.start.rowIndex===r-1&&x.updateCells.start.columnIndex===col-1)?.updateCells.rows[0].values[0].userEnteredValue.formulaValue;assert.match(at(48,9),/\$BJ48/);assert.match(at(48,9),/\$BN\$2:\$BN\$24/);assert.match(at(48,8),/MATCH\(SUBSTITUTE\(LOWER\(\$BJ48/);});
+test('Copied selected perk cannot apply when new owner lacks it',()=>{const sheet={getSheetId:()=>1,getRange:()=>({getFormulas:()=>[['=IF($G$25="Наука!";1;0)','=G32']]})};const r=c.sysSelectionRequests_(sheet);assert.match(r[0].updateCells.rows[0].values[0].userEnteredValue.formulaValue,/\$BP\$25/);assert.match(r.at(-1).updateCells.rows[0].values[0].userEnteredValue.formulaValue,/MATCH\(\$G\$32;\$BL/);});
+if(process.env.PROTECTORON_BRIDGE_SOURCE){
+vm.runInContext(fs.readFileSync(process.env.PROTECTORON_BRIDGE_SOURCE,'utf8'),c);
+c.sysEnabled_=()=>true;c.sysCore_=()=>({xp:70,kind:'Гуль'});c.sysRows_=()=>({rows:[[],paid]});
+test('Shop entry uses master XP, paid receipts and current class over stale cache',()=>{const row=['Альбедо','Райдер','','','',99,9,'char-1'];const e=c.entry_({rows:[[],row],sheet:{getRange:()=>({getFormula:()=> '=999'})}},'Альбедо');assert.equal(e.points,7);assert.equal(e.level,4);assert.equal(e.kind,'гуль');assert.equal(e.formula,false);});
+}
+console.log(`${checks} shared-state checks passed`);

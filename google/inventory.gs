@@ -165,12 +165,16 @@ function fminOwned_(bank,character,source,index,sync) {
   return {items:Object.keys(totals).sort().map(id=>totals[id]),manualUnknown:manual.unknown};
 }
 function fmSyncInventoryForOrder_(bank,order) {
+  if(typeof sysInstalling_==='function'&&sysInstalling_())return false;
+  if(typeof sysEnabled_==='function'&&sysEnabled_())return true;
   const character=bank.characters.find(c=>c.id===order.character.id);
   if(!character)return false;
   const source=fminSource_(character);if(!source)return false;
   fminOwned_(bank,character,source,fminIndex_(),true);return true;
 }
 function fmSyncInventories_(bank) {
+  if(typeof sysInstalling_==='function'&&sysInstalling_())return {synced:0,remaining:0};
+  if(typeof sysEnabled_==='function'&&sysEnabled_()){const result=sysRefresh_();return {synced:result.refreshed,remaining:0};}
   const ids={};fmRows_(bank.ledger,7).forEach(row=>{if(row[0])(ids[String(row[2])]||(ids[String(row[2])]=[])).push(row[0]);});
   const cache=CacheService.getScriptCache(),pending=bank.characters.filter(c=>ids[c.id]).filter(c=>cache.get('fm:inventory:'+c.id)!==fminHash_(ids[c.id]));
   let synced=0;
@@ -214,7 +218,7 @@ function fminInventory_(p,bank,report,user,fast) {
 function fminTemplate_(branch,characterClass) {
   const candidates=[branch].concat(FMIN_BRANCHES.filter(b=>b.id!==branch.id));
   for(const b of candidates){
-    const sheets=fminBook_(b.book).getSheets();
+    const sheets=fminBook_(b.book).getSheets().filter(s=>!s.getName().startsWith('_'));
     for(const s of sheets){if(fminNorm_(s.getRange('C2').getDisplayValue())===fminNorm_(characterClass)&&s.getRange('O14').getDisplayValue()==='Рюкзак')return s;}
   }
   fmError_('template_not_found');
@@ -286,6 +290,12 @@ function fminSave_(p,bank,report,user) {
   return fminInventory_(p,bank,report,user);
 }
 function fmInventoryDispatch_(p,bank,report,user) {
+  if(typeof sysInstalling_==='function'&&sysInstalling_())throw Error('busy');
+  if(typeof sysEnabled_==='function'&&sysEnabled_()){
+    if(p.action==='market_inventory')return sysInventory_(p,bank,report,user);
+    if(p.action==='market_pack_save')return sysSavePack_(p,bank,report,user);
+    if(p.action==='market_branch_join')return sysJoin_(p,bank,report,user);
+  }
   if(p.action==='market_inventory')return fminInventory_(p,bank,report,user,true);
   if(p.action==='market_branch_join')return fminJoin_(p,bank,report,user);
   if(p.action==='market_pack_save')return fminSave_(p,bank,report,user);
