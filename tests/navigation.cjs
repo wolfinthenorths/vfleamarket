@@ -18,7 +18,7 @@ setImmediate(()=>{
   navigate('#shop/kirk');assert.equal(y,720);navigate('');assert.equal(y,930);
   assert.equal(context.history.scrollRestoration,'manual');
   assert.match(node('#cart-total').textContent,/570/);
-  navigate('#carts/kirk');assert.match(node('#main').innerHTML,/Всего во всех корзинах[\s\S]*570/);assert.match(node('#main').innerHTML,/Списать|К торговым|К покупке|Открыть в Telegram/);
+  navigate('#carts/kirk');assert.match(node('#main').innerHTML,/Всего во всех корзинах[\s\S]*570/);assert.match(node('#main').innerHTML,/Списать|К торговым|К покупке|Войти/);
   assert.match(node('#main').innerHTML,/class="cart-item-image" data-detail="kirk-15"/);
   assert.match(node('#main').innerHTML,/class="cart-item-name" data-detail="kirk-15"/);
   scroll(540);

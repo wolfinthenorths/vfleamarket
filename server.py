@@ -86,8 +86,8 @@ def bot_worker():
         return
     telegram("setChatMenuButton", {"menu_button": {"type": "web_app", "text": "Блошиный рынок", "web_app": {"url": APP_URL}}})
     telegram("setMyCommands", {"commands": [{"command": "start", "description": "Открыть Блошиный рынок"}, {"command": "shop", "description": "Магазины и корзины"}, {"command": "help", "description": "Как покупать за крышки"}]})
-    telegram("setMyDescription", {"description": "Блошиный рынок Dawn of the Dead. Шесть магазинов, игровые предметы и снаряжение. Собирайте корзину и покупайте за внутриигровые крышки."})
-    telegram("setMyShortDescription", {"short_description": "Торговые ряды Блошиного рынка. Предметы, снаряжение и покупки за крышки."})
+    telegram("setMyDescription", {"description": "Добро пожаловать на Блошиный рынок, Выживший!\n\nМентаты, двустволка и кукла Вуду уже ждет — скорее трать свои крышки."})
+    telegram("setMyShortDescription", {"short_description": "Торговые ряды Блошиного рынка."})
     with db() as con:
         row = con.execute("SELECT value FROM settings WHERE key='telegram_offset'").fetchone()
     offset = int(row[0]) if row else 0
