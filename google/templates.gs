@@ -240,10 +240,11 @@ function sysPerkLayoutRequests_(id,kind,offset) {
     // The ledger export contains purchased/awarded perks only; the class card is separate.
     for(let n=0;n<20;n++){
       const row=first+n,key='$BJ'+row;
-      merge(row,row,7,13);
+      merge(row,row,7,8);merge(row,row,9,13);
       put(row,62,'=IF($A$2="";"";LET(perks;'+sysOwnedPerksExpr_()+';IF(perks="";"";IFERROR(INDEX(SPLIT(perks;CHAR(10));1;'+(n+1)+');""))))');
       put(row,6,sysPerkImageFormula_(key,44));
-      put(row,7,sysAcquiredPerkLabelFormula_(row,n===0));
+      put(row,7,sysAcquiredPerkTypeFormula_(row,n===0));
+      put(row,9,sysAcquiredPerkLabelFormula_(row,n===0));
     }
     heights(38+shift,43,21);heights(44,44,32);heights(45,64,48);heights(65,70,21);
     r.push(sysReadablePerkFormat_(range(title,title,6,13),'795064','Calibri',12,true,'CENTER','ffffff'));
@@ -370,5 +371,9 @@ function sysPerkEmphasisRequests_(id,kind,offset) {
 
 function sysAcquiredPerkLabelFormula_(row,first) {
   const key='$BJ'+row,empty=first?'Нет полученных перков':'';
-  return '=IF($A$2="";"";IF('+key+'="";"'+empty+'";IFNA(XLOOKUP('+sysPerkNorm_(key)+';ARRAYFORMULA('+sysPerkNorm_('$AQ$2:$AQ$21')+');$AR$2:$AR$21);"Тип не указан")&" • "&'+key+'))';
+  return '=IF($A$2="";"";IF('+key+'="";"'+empty+'";'+key+'))';
+}
+function sysAcquiredPerkTypeFormula_(row,first) {
+  const key='$BJ'+row;
+  return '=IF($A$2="";"";IF('+key+'="";"'+(first?'—':'')+'";IFNA(XLOOKUP('+sysPerkNorm_(key)+';ARRAYFORMULA('+sysPerkNorm_('$AQ$2:$AQ$21')+');$AR$2:$AR$21);"Тип не указан")))';
 }
